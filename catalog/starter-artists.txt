@@ -1,0 +1,27 @@
+# TrackBuzz imports these artists the first time it starts with an empty catalog.
+# Add one artist per line. Lines starting with # are ignored.
+The Beatles
+Queen
+Led Zeppelin
+Pink Floyd
+David Bowie
+Fleetwood Mac
+Stevie Wonder
+Aretha Franklin
+Miles Davis
+John Coltrane
+Bob Dylan
+Joni Mitchell
+Bob Marley & The Wailers
+Michael Jackson
+Prince
+Madonna
+Nirvana
+Radiohead
+Metallica
+Red Hot Chili Peppers
+Beyoncé
+Kendrick Lamar
+Taylor Swift
+Billie Eilish
+Daft Punk
