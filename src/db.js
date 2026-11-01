@@ -142,6 +142,22 @@ const MIGRATIONS = [
     error TEXT
   );
   `,
+  `
+  ALTER TABLE import_queue RENAME TO import_queue_old;
+  CREATE TABLE import_queue (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('artist', 'artist_id', 'search')),
+    term TEXT NOT NULL,
+    term_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'done', 'failed')),
+    error TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at TEXT,
+    UNIQUE (kind, term_key)
+  );
+  INSERT INTO import_queue SELECT * FROM import_queue_old;
+  DROP TABLE import_queue_old;
+  `,
 ];
 
 export function openDb(path) {

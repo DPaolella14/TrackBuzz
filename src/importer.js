@@ -52,11 +52,14 @@ export class Importer {
     return Boolean(this.db.prepare('SELECT 1 FROM albums WHERE mbid = ?').get(mbid));
   }
 
-  async ensureArtist(artist) {
+  async ensureArtist(artist, options) {
     const existing = this.db.prepare('SELECT id FROM artists WHERE mbid = ?').get(artist.id);
     if (existing) return existing.id;
-    const full = await this.mb.lookupArtist(artist.id);
+    const full = await this.mb.lookupArtist(artist.id, options);
     return transaction(this.db, () => {
+      // Someone else may have added this artist during the lookup.
+      const added = this.db.prepare('SELECT id FROM artists WHERE mbid = ?').get(artist.id);
+      if (added) return added.id;
       const id = Number(this.db.prepare(`INSERT INTO artists (mbid, name, country, artist_type, begin_year) VALUES (?, ?, ?, ?, ?)`)
         .run(full.id, full.name, full.country ?? null, full.type ?? null, yearOf(full['life-span']?.begin)).lastInsertRowid);
       linkGenres(this.db, 'artist_genres', 'artist_id', id, full.genres);
@@ -64,18 +67,20 @@ export class Importer {
     });
   }
 
-  // Returns true when a new album was stored.
-  async importReleaseGroup(mbid) {
+  // Returns true when a new album was stored. With force, a person asked for this exact release,
+  // so it's stored even if it's a type the automatic imports skip.
+  async importReleaseGroup(mbid, { force = false, ...options } = {}) {
     if (this.albumExists(mbid)) return false;
-    const group = await this.mb.lookupReleaseGroup(mbid);
-    if (!isWantedGroup(group)) return false;
-    const { releases } = await this.mb.browseReleases(mbid);
+    const group = await this.mb.lookupReleaseGroup(mbid, options);
+    if (!force && !isWantedGroup(group)) return false;
+    const { releases } = await this.mb.browseReleases(mbid, options);
     const release = chooseRelease(releases);
     const credit = group['artist-credit']?.[0]?.artist;
     if (!release || !credit) return false;
-    const artistId = await this.ensureArtist(credit);
+    const artistId = await this.ensureArtist(credit, options);
     const albumCredit = creditText(group['artist-credit']);
-    transaction(this.db, () => {
+    return transaction(this.db, () => {
+      if (this.albumExists(mbid)) return false;
       const albumId = Number(this.db.prepare(`INSERT INTO albums (mbid, title, artist_id, artist_credit, release_date, album_type, cover_url) VALUES (?, ?, ?, ?, ?, ?, ?)`)
         .run(group.id, group.title, artistId, albumCredit, group['first-release-date'] || release.date || null, group['primary-type'],
           `https://coverartarchive.org/release-group/${group.id}/front-250`).lastInsertRowid);
@@ -89,17 +94,21 @@ export class Importer {
             medium.position ?? mediumIndex + 1, track.position ?? trackIndex + 1, track.length ?? recording.length ?? null);
         }
       }
+      return true;
     });
-    return true;
   }
 
   async importArtistByName(name) {
     const { artists = [] } = await this.mb.searchArtists(`artist:"${escapeLucene(name)}"`, 1);
     const match = artists[0];
     if (!match || (match.score ?? 0) < SEARCH_MATCH_SCORE) return 0;
-    await this.ensureArtist(match);
+    return this.importArtistById(match.id, match);
+  }
+
+  async importArtistById(mbid, artist = { id: mbid }) {
+    await this.ensureArtist(artist);
     let added = 0;
-    const { 'release-groups': groups = [] } = await this.mb.browseArtistReleaseGroups(match.id);
+    const { 'release-groups': groups = [] } = await this.mb.browseArtistReleaseGroups(mbid);
     const wanted = groups.filter(isWantedGroup).sort((a, b) => Number(b['primary-type'] === 'Album') - Number(a['primary-type'] === 'Album')
       || String(b['first-release-date'] || '').localeCompare(String(a['first-release-date'] || '')));
     for (const group of wanted.slice(0, ARTIST_ALBUM_LIMIT)) {
@@ -178,6 +187,14 @@ export function importStatus(db, term) {
   return row?.status ?? null;
 }
 
+export function artistImportPending(db, mbid) {
+  return Boolean(mbid && db.prepare(`SELECT 1 FROM import_queue WHERE kind = 'artist_id' AND term_key = ? AND status = 'pending'`).get(mbid.toLowerCase()));
+}
+
+export function libraryLoading(db) {
+  return Boolean(db.prepare(`SELECT 1 FROM import_queue WHERE status = 'pending' LIMIT 1`).get());
+}
+
 export function enqueueStarterCatalog(db) {
   if (db.prepare('SELECT 1 FROM artists LIMIT 1').get() || db.prepare('SELECT 1 FROM import_queue LIMIT 1').get()) return 0;
   const names = readFileSync(new URL('../catalog/starter-artists.txt', import.meta.url), 'utf8')
@@ -188,10 +205,11 @@ export function enqueueStarterCatalog(db) {
 
 export async function processNextImport(db, importer) {
   const job = db.prepare(`SELECT id, kind, term FROM import_queue WHERE status = 'pending'
-    ORDER BY (kind = 'search') DESC, id LIMIT 1`).get();
+    ORDER BY (kind IN ('search', 'artist_id')) DESC, id LIMIT 1`).get();
   if (!job) return false;
   try {
     if (job.kind === 'artist') await importer.importArtistByName(job.term);
+    else if (job.kind === 'artist_id') await importer.importArtistById(job.term);
     else await importer.importSearchTerm(job.term);
     db.prepare(`UPDATE import_queue SET status = 'done', finished_at = datetime('now') WHERE id = ?`).run(job.id);
   } catch (err) {

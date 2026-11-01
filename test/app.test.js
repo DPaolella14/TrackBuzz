@@ -42,7 +42,7 @@ describe('search', () => {
 
   it('suggests matches as JSON', async () => {
     const { text } = await new Client(app.base).get('/api/suggest?q=mid');
-    assert.deepEqual(JSON.parse(text).items[0], { name: 'Midnight Signal', context: 'Album by Beyoncé Test Band', url: `/albums/${ids.album}` });
+    assert.deepEqual(JSON.parse(text).items[0], { kind: 'album', name: 'Midnight Signal', context: 'Album by Beyoncé Test Band', cover: null, url: `/albums/${ids.album}` });
   });
 });
 
@@ -53,7 +53,7 @@ describe('topic pages', () => {
       const { status, text } = await client.get(path);
       assert.equal(status, 200, path);
       for (const label of ['Personal stories', 'Concerts', 'Performance tips', 'Ratings']) assert.ok(text.includes(label), `${path} ${label}`);
-      assert.match(text, /aria-current="page">\s*Personal stories/);
+      assert.match(text, /aria-current="page">\s*<span class="tab-label">Personal stories/);
     }
   });
 

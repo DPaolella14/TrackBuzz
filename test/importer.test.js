@@ -167,7 +167,7 @@ describe('MusicBrainz client', () => {
       sleep: async (ms) => { waits.push(ms); },
     });
     await Promise.all([client.lookupArtist('abc'), client.lookupArtist('def')]);
-    assert.equal(requests[0].options.headers['User-Agent'], 'TrackBuzz/0.1 ( test@example.com )');
+    assert.equal(requests[0].options.headers['User-Agent'], 'TrackBuzz/0.2 ( test@example.com )');
     assert.equal(requests[0].url.href, 'https://musicbrainz.org/ws/2/artist/abc?inc=genres&fmt=json');
     assert.ok(waits[0] > 1000 && waits[0] <= 1100, `waited ${waits[0]}`);
   });

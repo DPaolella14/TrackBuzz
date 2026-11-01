@@ -1,7 +1,13 @@
-// The site works without this file. It adds search suggestions, delete confirmation, and cover art fallback.
+// The site works without this file. It adds live search, delete confirmation, cover art fallback,
+// and refreshes pages that are waiting on music to be added.
+
+const LIVE_KINDS = ['artist', 'album', 'song'];
 
 document.addEventListener('error', (event) => {
-  if (event.target instanceof HTMLImageElement && event.target.closest('.cover')) event.target.remove();
+  if (event.target instanceof HTMLImageElement) {
+    if (event.target.closest('.cover')) event.target.remove();
+    else if (event.target.closest('.thumb')) event.target.remove();
+  }
 }, true);
 
 document.addEventListener('submit', (event) => {
@@ -9,70 +15,158 @@ document.addEventListener('submit', (event) => {
   if (message && !window.confirm(message)) event.preventDefault();
 });
 
+const refresher = document.querySelector('[data-auto-refresh]');
+if (refresher) {
+  setTimeout(function check() {
+    // Never reload over something a person is writing.
+    const typing = [...document.querySelectorAll('textarea, input[type="search"]')].some((field) => field.value.trim());
+    if (typing) setTimeout(check, 8000);
+    else window.location.reload();
+  }, 8000);
+}
+
+function resultContent(item) {
+  const thumb = document.createElement('span');
+  thumb.className = `thumb thumb-${item.kind || 'other'}`;
+  thumb.setAttribute('aria-hidden', 'true');
+  if (item.cover) {
+    const image = document.createElement('img');
+    image.src = item.cover;
+    image.alt = '';
+    image.loading = 'lazy';
+    image.referrerPolicy = 'no-referrer';
+    thumb.append(image);
+  }
+  const text = document.createElement('span');
+  text.className = 'result-text';
+  const name = document.createElement('strong');
+  name.textContent = item.name;
+  const context = document.createElement('span');
+  context.textContent = item.context;
+  text.append(name, context);
+  return [thumb, text];
+}
+
+async function fetchItems(path, signal) {
+  const response = await fetch(path, { signal });
+  if (!response.ok) return [];
+  return (await response.json()).items || [];
+}
+
 for (const form of document.querySelectorAll('form[data-suggest]')) {
   const input = form.querySelector('input[type="search"]');
   const list = form.querySelector('.suggestions');
-  let timer;
+  let localTimer;
+  let liveTimer;
+  let controller = null;
   let active = -1;
-  let requestId = 0;
+  let shown = new Set();
 
   const options = () => [...list.querySelectorAll('[role="option"]')];
-  const close = () => {
+  const status = () => list.querySelector('.suggest-status');
+
+  function open() {
+    const hasContent = list.children.length > 0;
+    list.hidden = !hasContent;
+    input.setAttribute('aria-expanded', String(hasContent));
+  }
+  function close() {
     list.hidden = true;
     active = -1;
     input.setAttribute('aria-expanded', 'false');
     input.removeAttribute('aria-activedescendant');
-  };
-  const highlight = (index) => {
+  }
+  function highlight(index) {
     const items = options();
     items.forEach((item, i) => item.setAttribute('aria-selected', String(i === index)));
     active = index;
-    if (items[index]) input.setAttribute('aria-activedescendant', items[index].id);
-    else input.removeAttribute('aria-activedescendant');
-  };
-
-  async function load() {
-    const q = input.value.trim();
-    const id = ++requestId;
-    if (q.length < 2) return close();
-    try {
-      const response = await fetch(`/api/suggest?q=${encodeURIComponent(q)}`);
-      if (!response.ok) return close();
-      const { items } = await response.json();
-      if (id !== requestId) return undefined;
-      list.replaceChildren(...items.map((item, index) => {
-        const li = document.createElement('li');
-        li.id = `${list.id}-${index}`;
-        li.setAttribute('role', 'option');
-        li.setAttribute('aria-selected', 'false');
-        const link = document.createElement('a');
-        link.href = item.url;
-        link.tabIndex = -1;
-        const name = document.createElement('strong');
-        name.textContent = item.name;
-        const context = document.createElement('span');
-        context.textContent = item.context;
-        link.append(name, context);
-        li.append(link);
-        return li;
-      }));
-      active = -1;
-      list.hidden = !items.length;
-      input.setAttribute('aria-expanded', String(Boolean(items.length)));
-    } catch {
-      close();
+    if (items[index]) {
+      input.setAttribute('aria-activedescendant', items[index].id);
+      items[index].scrollIntoView({ block: 'nearest' });
+    } else {
+      input.removeAttribute('aria-activedescendant');
     }
-    return undefined;
+  }
+  function addItems(items) {
+    const fresh = items.filter((item) => !shown.has(item.url) && shown.add(item.url));
+    const before = status();
+    for (const item of fresh) {
+      const li = document.createElement('li');
+      li.id = `${list.id}-${list.children.length}`;
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', 'false');
+      const link = document.createElement('a');
+      link.href = item.url;
+      link.tabIndex = -1;
+      link.rel = 'nofollow';
+      link.append(...resultContent(item));
+      li.append(link);
+      list.insertBefore(li, before);
+    }
+    open();
+  }
+  function setStatus(text) {
+    let row = status();
+    if (!text) {
+      row?.remove();
+    } else {
+      if (!row) {
+        row = document.createElement('li');
+        row.className = 'suggest-status';
+        row.setAttribute('role', 'presentation');
+        list.append(row);
+      }
+      row.textContent = text;
+    }
+    open();
+  }
+
+  async function runLocal(q, signal) {
+    const items = await fetchItems(`/api/suggest?q=${encodeURIComponent(q)}`, signal);
+    if (!signal.aborted) addItems(items);
+  }
+
+  async function runLive(q, signal) {
+    setStatus('Searching all music');
+    for (const kind of LIVE_KINDS) {
+      if (signal.aborted) return;
+      const items = await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`, signal);
+      if (!signal.aborted) addItems(items);
+    }
+    if (signal.aborted) return;
+    setStatus(options().length ? '' : `No matches for "${q}" yet. Keep typing or check the spelling.`);
   }
 
   input.addEventListener('input', () => {
-    clearTimeout(timer);
-    timer = setTimeout(load, 150);
+    clearTimeout(localTimer);
+    clearTimeout(liveTimer);
+    controller?.abort();
+    controller = new AbortController();
+    const { signal } = controller;
+    const q = input.value.trim();
+    if (!q) {
+      list.replaceChildren();
+      shown = new Set();
+      close();
+      return;
+    }
+    localTimer = setTimeout(() => {
+      // Results swap in together, so the list doesn't flash empty between letters.
+      list.replaceChildren();
+      shown = new Set();
+      active = -1;
+      runLocal(q, signal).catch(() => {});
+    }, 60);
+    if (q.length >= 2) {
+      liveTimer = setTimeout(() => runLive(q, signal).catch(() => {
+        if (!signal.aborted) setStatus('');
+      }), 300);
+    }
   });
   input.addEventListener('keydown', (event) => {
     if (list.hidden) return;
     const items = options();
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && items.length) {
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
       highlight((active + step + items.length) % items.length);
@@ -83,7 +177,43 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
       close();
     }
   });
+  input.addEventListener('focus', () => {
+    if (list.children.length) open();
+  });
+  list.addEventListener('click', (event) => {
+    const link = event.target.closest('a');
+    if (link) setStatus('Opening');
+  });
   document.addEventListener('click', (event) => {
     if (!form.contains(event.target)) close();
+  });
+}
+
+const livePanel = document.querySelector('[data-live-results]');
+if (livePanel) {
+  const q = livePanel.dataset.liveResults;
+  const list = livePanel.querySelector('.result-list');
+  const note = livePanel.querySelector('.live-status');
+  const seen = new Set([...document.querySelectorAll('.result-list a')].map((link) => link.getAttribute('href')));
+  (async () => {
+    for (const kind of LIVE_KINDS) {
+      const items = await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`);
+      for (const item of items) {
+        if (!seen.has(item.url)) {
+          seen.add(item.url);
+          const li = document.createElement('li');
+          const link = document.createElement('a');
+          link.className = 'result';
+          link.href = item.url;
+          link.rel = 'nofollow';
+          link.append(...resultContent(item));
+          li.append(link);
+          list.append(li);
+        }
+      }
+    }
+    note.textContent = list.children.length ? '' : 'MusicBrainz has no other matches.';
+  })().catch(() => {
+    note.textContent = 'MusicBrainz isn\'t responding. Try again in a moment.';
   });
 }

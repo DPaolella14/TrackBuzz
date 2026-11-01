@@ -27,9 +27,17 @@ export function formatDuration(ms) {
 const yearOf = (date) => String(date || '').slice(0, 4);
 
 // A printed-looking placeholder that is unique to each title, shown until (or instead of) cover art.
+const logoMark = html`<svg class="logo-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+  <path fill="#f6f4ff" d="M11 3h18a9 9 0 0 1 9 9v10a9 9 0 0 1-9 9H17l-8 7v-7.2A9 9 0 0 1 2 22V12a9 9 0 0 1 9-9z"></path>
+  <rect x="9.5" y="13" width="4" height="8" rx="2" fill="#ff5c8a"></rect>
+  <rect x="15.5" y="8" width="4" height="18" rx="2" fill="#f59f00"></rect>
+  <rect x="21.5" y="11" width="4" height="12" rx="2" fill="#12b89a"></rect>
+  <rect x="27.5" y="14" width="4" height="6" rx="2" fill="#7a63ff"></rect>
+</svg>`;
+
 function placeholderArt(seed) {
   const bytes = createHash('sha1').update(String(seed)).digest();
-  const inks = ['var(--pink)', 'var(--yellow)', 'var(--mint)', 'var(--ink)'];
+  const inks = ['var(--pink)', 'var(--amber)', 'var(--teal)', 'var(--violet)'];
   const first = inks[bytes[0] % 4];
   const second = inks[(bytes[0] % 4 + 1 + (bytes[1] % 3)) % 4];
   const cx = 20 + (bytes[2] % 60);
@@ -40,7 +48,7 @@ function placeholderArt(seed) {
     return html`<rect x="${6 + i * 11.5}" y="${94 - height}" width="7" height="${height}" fill="${second}"></rect>`;
   });
   return html`<svg class="art-placeholder" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-    <rect width="100" height="100" fill="var(--paper-deep)"></rect>
+    <rect width="100" height="100" fill="var(--surface-2)"></rect>
     <circle class="overprint" cx="${cx}" cy="${cy}" r="${radius}" fill="${first}"></circle>
     <g class="overprint">${bars}</g>
   </svg>`;
@@ -92,7 +100,7 @@ export function layout(ctx, { title, body, q = '', hero = false, status = 200 })
 <body>
   <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
-    <a class="logo" href="/" aria-label="TrackBuzz home">Track<span>Buzz</span></a>
+    <a class="logo" href="/" aria-label="TrackBuzz home">${logoMark}<span class="logo-word">Track<span>Buzz</span></span></a>
     <nav class="site-nav" aria-label="Browse">
       <a href="/albums">Albums</a>
       <a href="/songs">Songs</a>
@@ -223,7 +231,7 @@ function pager(basePath, params, page, hasMore) {
   </nav>`;
 }
 
-export function homePage(ctx, { albums, posts, genres }) {
+export function homePage(ctx, { albums, posts, genres, loading }) {
   return layout(ctx, {
     hero: true,
     body: html`
@@ -236,9 +244,9 @@ export function homePage(ctx, { albums, posts, genres }) {
     ${albums.length ? html`<section class="section">
       <div class="section-head"><h2>New releases</h2><a href="/albums">All albums</a></div>
       ${albumGrid(albums)}
-    </section>` : html`<section class="section empty">
-      <h2>The library is loading</h2>
-      <p>Albums and songs appear here as they're imported. Check back in a few minutes.</p>
+    </section>` : html`<section class="section empty" ${loading ? html`data-auto-refresh` : ''}>
+      <h2>${loading ? 'The first albums are on their way' : 'Search to get started'}</h2>
+      <p>${loading ? 'This page updates when they arrive. You can already search for any artist, album, or song above.' : 'Search for any artist, album, or song above.'}</p>
     </section>`}
     <div class="home-columns">
       <section class="section">
@@ -269,7 +277,7 @@ function resultRow(item) {
 
 export function suggestionItem(item) {
   const context = { album: `Album by ${item.artist_credit}`, song: `Song by ${item.artist_credit}`, artist: 'Artist', genre: 'Genre' }[item.type];
-  return { name: item.name, context, url: topicUrl(item) };
+  return { kind: item.type, name: item.name, context, cover: item.cover_url || null, url: topicUrl(item) };
 }
 
 export function searchPage(ctx, { q, kind, results, page, importState }) {
@@ -277,12 +285,12 @@ export function searchPage(ctx, { q, kind, results, page, importState }) {
   const total = Object.values(results.counts).reduce((sum, count) => sum + count, 0);
   const searchMore = !q ? '' : importState === 'pending'
     ? html`<p class="import-note" role="status">Looking for "${q}" on MusicBrainz. Anything found will appear here in a few minutes.</p>`
-    : importState === 'done' ? (total ? '' : html`<p class="import-note">MusicBrainz has no close match for "${q}". Check the spelling or try fewer words.</p>`)
-      : ctx.user ? html`<form class="import-note" action="/catalog/request" method="post">
+    : ctx.user ? html`<noscript><form class="import-note" action="/catalog/request" method="post">
         ${csrfField(ctx)}<input type="hidden" name="q" value="${q}">
         <span>Can't find what you're looking for?</span>
         <button class="button button-small" type="submit">Add "${q}" to the library</button>
-      </form>` : html`<p class="import-note"><a href="/login?next=${encodeURIComponent(`/search?q=${q}`)}">Log in</a> to add missing music to the library.</p>`;
+      </form></noscript>` : '';
+  const showLive = q && !kind && page === 1;
   return layout(ctx, {
     title: q ? `Search: ${q}` : 'Search',
     q,
@@ -296,6 +304,11 @@ export function searchPage(ctx, { q, kind, results, page, importState }) {
       ${results.items.length ? html`<ul class="result-list">${results.items.map(resultRow)}</ul>`
     : q ? html`<p class="empty-text">Nothing in the library matches "${q}"${kind ? ` in ${KIND_PLURAL[kind].toLowerCase()}` : ''}.</p>` : ''}
       ${pager('/search', { q, ...(kind ? { type: kind } : {}) }, page, results.hasMore)}
+      ${showLive ? html`<section class="live-section" data-live-results="${q}">
+        <h2>More from MusicBrainz</h2>
+        <ul class="result-list"></ul>
+        <p class="live-status" role="status">Searching all music</p>
+      </section>` : ''}
       ${searchMore}
     </section>`,
   });
@@ -340,7 +353,8 @@ function topicRelated({ topic, related }) {
     case 'album':
       return related.songs.length ? html`<section class="section"><h2>Songs on this album</h2>${songRows(related.songs, { showAlbum: false, numbered: true })}</section>` : '';
     case 'artist':
-      return related.albums.length ? html`<section class="section"><h2>Albums and EPs</h2>${albumGrid(related.albums)}</section>` : '';
+      return html`${related.albums.length ? html`<section class="section"><h2>Albums and EPs</h2>${albumGrid(related.albums)}</section>` : ''}
+        ${related.importing ? html`<p class="section live-status" data-auto-refresh role="status">Adding this artist's albums. This page updates as they arrive.</p>` : ''}`;
     case 'genre':
       return html`${related.albums.length ? html`<section class="section"><h2>Albums</h2>${albumGrid(related.albums)}</section>` : ''}
         ${related.artists.length ? html`<section class="section"><h2>Artists</h2><ul class="chips">${related.artists.map((artist) => html`<li><a class="chip" href="${topicUrl(artist)}">${artist.name}</a></li>`)}</ul></section>` : ''}`;
@@ -368,7 +382,7 @@ export function topicPage(ctx, { topic, tab, stats, posts, page, genres, related
       </header>
       <nav class="tabs" aria-label="Conversations about ${topic.name}">
         ${Object.entries(TABS).map(([key, config]) => html`<a class="tab tab-${key}" href="${topicUrl(topic, key)}#conversation" ${key === tab ? html`aria-current="page"` : ''}>
-          ${config.label}<span class="tab-count">${stats.counts[key]}</span>
+          <span class="tab-label">${config.label}</span><span class="tab-count">${stats.counts[key]}</span>
         </a>`)}
       </nav>
       <section class="conversation tab-${tab}" id="conversation">

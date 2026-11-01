@@ -22,7 +22,7 @@ export function getTopic(db, type, id) {
     song: `SELECT songs.id, songs.title AS name, songs.artist_id, songs.artist_credit, songs.duration_ms,
                   songs.album_id, albums.title AS album_title, albums.cover_url, albums.release_date
            FROM songs JOIN albums ON albums.id = songs.album_id WHERE songs.id = ?`,
-    artist: 'SELECT id, name, country, artist_type, begin_year FROM artists WHERE id = ?',
+    artist: 'SELECT id, mbid, name, country, artist_type, begin_year FROM artists WHERE id = ?',
     genre: 'SELECT id, name, slug FROM genres WHERE id = ?',
   };
   if (!queries[type]) return null;

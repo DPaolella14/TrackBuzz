@@ -6,7 +6,9 @@ import {
   RateLimiter, SESSION_MAX_AGE, createSession, destroySession, hashPassword, userFromSession, validateSignup, verifyPassword,
 } from './auth.js';
 import * as catalog from './catalog.js';
-import { enqueueImport, importStatus } from './importer.js';
+import { artistImportPending, enqueueImport, importStatus, libraryLoading } from './importer.js';
+import { LIVE_KINDS } from './live-search.js';
+import { INTERACTIVE } from './musicbrainz.js';
 import * as posts from './posts.js';
 import * as views from './views.js';
 
@@ -76,7 +78,10 @@ async function readForm(req) {
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
 }
 
-export function createApp({ db, config }) {
+const MBID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+const OPEN_OPTIONS = { ...INTERACTIVE, force: true };
+
+export function createApp({ db, config, importer = null, live = null }) {
   const limits = {
     loginAccount: new RateLimiter({ limit: 10, windowMs: 15 * 60000 }),
     // Many people can share one IP address, so these allow more than the per-account limit.
@@ -85,6 +90,8 @@ export function createApp({ db, config }) {
     post: new RateLimiter({ limit: 20, windowMs: 10 * 60000 }),
     request: new RateLimiter({ limit: 10, windowMs: 60 * 60000 }),
     suggest: new RateLimiter({ limit: 300, windowMs: 60000 }),
+    live: new RateLimiter({ limit: 180, windowMs: 60000 }),
+    open: new RateLimiter({ limit: 60, windowMs: 60000 }),
   };
   const cookieFlags = `HttpOnly; SameSite=Lax; Path=/${config.secureCookies ? '; Secure' : ''}`;
 
@@ -137,7 +144,10 @@ export function createApp({ db, config }) {
     const page = options.page || pageNumber(ctx.url);
     const related = {};
     if (topic.type === 'album') related.songs = catalog.albumSongs(db, topic.id);
-    if (topic.type === 'artist') related.albums = catalog.artistAlbums(db, topic.id);
+    if (topic.type === 'artist') {
+      related.albums = catalog.artistAlbums(db, topic.id);
+      related.importing = artistImportPending(db, topic.mbid);
+    }
     if (topic.type === 'genre') {
       related.albums = catalog.genreAlbums(db, topic.id);
       related.artists = catalog.genreArtists(db, topic.id);
@@ -178,6 +188,25 @@ export function createApp({ db, config }) {
     ctx.cookies.push(`tb_session=${token}; Max-Age=${SESSION_MAX_AGE}; ${cookieFlags}`);
   };
 
+  async function importAlbum(mbid) {
+    await importer.importReleaseGroup(mbid, OPEN_OPTIONS);
+    const album = db.prepare('SELECT id FROM albums WHERE mbid = ?').get(mbid);
+    if (!album) throw new HttpError(404, 'Couldn\'t open that', 'MusicBrainz has no track listing for this release yet.');
+    return album;
+  }
+
+  async function openFromCatalog(ctx, action) {
+    limit(limits.open, ctx.ip);
+    if (!importer) throw notFound();
+    try {
+      return await action();
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      console.error(`Opening from MusicBrainz failed: ${err.message}`);
+      throw new HttpError(503, 'Couldn\'t reach MusicBrainz', 'MusicBrainz isn\'t responding. Go back and try again in a moment.');
+    }
+  }
+
   const browse = (kind, lister, size) => (ctx) => {
     const page = pageNumber(ctx.url);
     send(ctx, views.browsePage(ctx, { kind, page, list: lister(db, { offset: (page - 1) * size }) }));
@@ -189,6 +218,7 @@ export function createApp({ db, config }) {
         albums: catalog.listAlbums(db, { limit: 12 }).items,
         posts: withTopics(posts.recentPosts(db, 6)),
         genres: catalog.listGenres(db, { limit: 24 }).items,
+        loading: libraryLoading(db),
       }));
     }],
     ['GET', /^\/healthz$/, (ctx) => {
@@ -206,7 +236,38 @@ export function createApp({ db, config }) {
     ['GET', /^\/api\/suggest$/, (ctx) => {
       limit(limits.suggest, ctx.ip);
       const q = (ctx.url.searchParams.get('q') || '').trim().slice(0, 120);
-      sendJson(ctx, { items: q.length < 2 ? [] : catalog.search(db, q, { limit: 7 }).items.map(views.suggestionItem) });
+      sendJson(ctx, { items: catalog.search(db, q, { limit: 8 }).items.map(views.suggestionItem) });
+    }],
+    ['GET', /^\/api\/live$/, async (ctx) => {
+      limit(limits.live, ctx.ip);
+      const kind = ctx.url.searchParams.get('kind');
+      if (!live || !LIVE_KINDS.includes(kind)) return sendJson(ctx, { items: [] });
+      const stop = new AbortController();
+      ctx.res.on('close', () => stop.abort());
+      try {
+        return sendJson(ctx, { items: await live.search(kind, ctx.url.searchParams.get('q') || '', { signal: stop.signal }) });
+      } catch (err) {
+        if (stop.signal.aborted) return undefined;
+        console.error(`Live search failed: ${err.message}`);
+        return sendJson(ctx, { items: [], unavailable: true });
+      }
+    }],
+    ['GET', new RegExp(`^/open/artist/(${MBID})$`), async (ctx, mbid) => {
+      const id = await openFromCatalog(ctx, async () => {
+        const artistId = await importer.ensureArtist({ id: mbid }, INTERACTIVE);
+        enqueueImport(db, 'artist_id', mbid);
+        return artistId;
+      });
+      redirect(ctx, `/artists/${id}`);
+    }],
+    ['GET', new RegExp(`^/open/album/(${MBID})$`), async (ctx, mbid) => {
+      const album = await openFromCatalog(ctx, () => importAlbum(mbid));
+      redirect(ctx, `/albums/${album.id}`);
+    }],
+    ['GET', new RegExp(`^/open/song/(${MBID})/(${MBID})$`), async (ctx, recordingId, groupId) => {
+      const album = await openFromCatalog(ctx, () => importAlbum(groupId));
+      const song = db.prepare('SELECT id FROM songs WHERE album_id = ? AND mbid = ? LIMIT 1').get(album.id, recordingId);
+      redirect(ctx, song ? `/songs/${song.id}` : `/albums/${album.id}`);
     }],
     ['POST', /^\/catalog\/request$/, (ctx) => {
       requireUser(ctx);
