@@ -46,10 +46,10 @@ const wordsIn = (text) => String(text).normalize('NFKC').toLowerCase().match(/[\
 
 // The last word may still be being typed, so it matches as a prefix. A single letter would mean reading
 // most of the index, so it's left out here, and search() checks it against the results instead.
-export function buildSearchQuery(text) {
+export function buildSearchQuery(text, { wholeWords = false } = {}) {
   const tokens = wordsIn(text).slice(0, 8);
   const parts = tokens.map((token, index) => {
-    if (token.length > 1) return index === tokens.length - 1 ? `"${token}"*` : `"${token}"`;
+    if (token.length > 1) return index === tokens.length - 1 && !wholeWords ? `"${token}"*` : `"${token}"`;
     return index === tokens.length - 1 ? null : `"${token}"`;
   }).filter(Boolean);
   if (!parts.length) return null;
@@ -72,6 +72,8 @@ function exactMatches(db, text, kind) {
   }
   return found;
 }
+
+const lastWordIsLong = (typed) => typed[typed.length - 1].length > 3;
 
 // With one letter typed so far, show the most popular artists and albums that start with it.
 function firstLetterMatches(db, letter, kind, limit) {
@@ -100,7 +102,14 @@ export function search(db, text, { kind = null, limit = 24, offset = 0 } = {}) {
   const kinds = kind ? [kind] : Object.keys(KIND_ORDER);
   const want = Math.max(CANDIDATES_PER_KIND, offset + limit + 1);
   const rows = [...exactMatches(db, clean, kind)];
-  kinds.forEach((one) => rows.push(...statement.all(`kind : ${one} AND (${match})`, want)));
+  // Reading one whole word stops early. A long prefix has to gather every word that starts with it first,
+  // so it only runs when whole words didn't find enough.
+  const wholeMatch = lastWordIsLong(typed) ? buildSearchQuery(clean, { wholeWords: true }) : null;
+  kinds.forEach((one) => {
+    const whole = wholeMatch ? statement.all(`kind : ${one} AND (${wholeMatch})`, want) : [];
+    rows.push(...whole);
+    if (whole.length < want) rows.push(...statement.all(`kind : ${one} AND (${match})`, want));
+  });
   const target = fold(clean);
   const words = target.match(/[\p{L}\p{N}]+/gu) || [];
   const closeness = (name) => {

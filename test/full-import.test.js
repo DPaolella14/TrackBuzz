@@ -162,6 +162,7 @@ describe('loading the catalog', () => {
     assert.equal(search(db, 'them bones alice').items[0].name, 'Them Bones', 'matches title and artist together');
     assert.deepEqual(search(db, 'zzzz').items, []);
     assert.equal(search(db, 'them b').items[0].name, 'Them Bones', 'partly typed last word');
+    assert.equal(search(db, 'roost').items[0].name, 'Rooster', 'a long partial word still matches');
     assert.deepEqual(search(db, 'them x').items, [], 'the last letter still has to match');
     assert.equal(search(db, 'a').items[0].name, 'Alice in Chains', 'one letter shows popular music');
   });
