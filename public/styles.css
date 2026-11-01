@@ -60,7 +60,7 @@ p { margin: 0 0 1em; }
 }
 .logo { display: inline-flex; align-items: center; gap: 9px; color: var(--text); font: 800 1.3rem/1 var(--display); letter-spacing: -0.03em; text-decoration: none; }
 .logo:hover { color: var(--text); }
-.logo-mark { display: block; width: 32px; height: 32px; }
+.logo-mark { display: block; width: 34px; height: 34px; }
 .logo-word span { color: var(--pink); }
 .site-nav { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .site-nav a { color: var(--soft); font-weight: 500; text-decoration: none; }

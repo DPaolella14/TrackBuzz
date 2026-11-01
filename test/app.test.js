@@ -218,6 +218,13 @@ describe('posting rules', () => {
   });
 });
 
+describe('home page', () => {
+  it('asks for the story behind your song', async () => {
+    const { text } = await new Client(app.base).get('/');
+    assert.ok(text.includes("What's the story behind your song?"));
+  });
+});
+
 describe('browser caching', () => {
   it('gives files a fingerprinted URL, so an update reaches browsers right away', async () => {
     const client = new Client(app.base);

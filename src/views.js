@@ -29,11 +29,13 @@ const yearOf = (date) => String(date || '').slice(0, 4);
 
 // A printed-looking placeholder that is unique to each title, shown until (or instead of) cover art.
 const logoMark = html`<svg class="logo-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-  <path fill="#f6f4ff" d="M11 3h18a9 9 0 0 1 9 9v10a9 9 0 0 1-9 9H17l-8 7v-7.2A9 9 0 0 1 2 22V12a9 9 0 0 1 9-9z"></path>
-  <rect x="9.5" y="13" width="4" height="8" rx="2" fill="#ff5c8a"></rect>
-  <rect x="15.5" y="8" width="4" height="18" rx="2" fill="#f59f00"></rect>
-  <rect x="21.5" y="11" width="4" height="12" rx="2" fill="#12b89a"></rect>
-  <rect x="27.5" y="14" width="4" height="6" rx="2" fill="#7a63ff"></rect>
+  <defs><linearGradient id="tb-logo" x1="4" y1="2" x2="36" y2="38" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ff5c8a"></stop><stop offset="1" stop-color="#7a5cff"></stop></linearGradient></defs>
+  <path fill="url(#tb-logo)" d="M11 2h18a9 9 0 0 1 9 9v12a9 9 0 0 1-9 9H17l-8 6.5v-6.7A9 9 0 0 1 2 23V11a9 9 0 0 1 9-9z"></path>
+  <g fill="#fff">
+    <ellipse cx="14.2" cy="24.2" rx="3.9" ry="3.1" transform="rotate(-20 14.2 24.2)"></ellipse>
+    <ellipse cx="26.8" cy="21.7" rx="3.9" ry="3.1" transform="rotate(-20 26.8 21.7)"></ellipse>
+    <path d="M16.3 24V11.7L30.9 8.4V21.5H28.5V13L18.7 15.2V24Z"></path>
+  </g>
 </svg>`;
 
 function placeholderArt(seed) {
@@ -237,7 +239,7 @@ export function homePage(ctx, { albums, posts, genres, loading }) {
     hero: true,
     body: html`
     <section class="hero">
-      <h1>What's the song behind your story?</h1>
+      <h1>What's the story behind your song?</h1>
       <p>Find any album, song, artist, or genre. Then share a personal story, a concert memory, a performance tip, or a rating.</p>
       ${searchForm('home-search')}
       <div class="hero-wave" aria-hidden="true">${Array.from({ length: 48 }, () => html`<span></span>`)}</div>
