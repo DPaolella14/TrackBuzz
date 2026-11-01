@@ -36,7 +36,7 @@ describe('search', () => {
     const filtered = await client.get('/search?q=paper&type=album');
     assert.ok(!filtered.text.includes('Paper Crown'));
     assert.ok(!filtered.text.includes('MusicBrainz</h2>'), 'no separate section for outside results');
-    for (const q of ['"', 'AND OR NOT', '*', 'a:b', '(((', 'NEAR(']) {
+    for (const q of ['"', 'AND OR NOT', '*', 'a:b', '(((', 'NEAR(', 'a', 'kind', '{name}', 'x y z']) {
       assert.equal((await client.get(`/search?q=${encodeURIComponent(q)}`)).status, 200, q);
     }
   });

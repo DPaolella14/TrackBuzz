@@ -76,6 +76,15 @@ const MBID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-
 const OPEN_OPTIONS = { ...INTERACTIVE, force: true };
 
 export function createApp({ db, config, importer = null, live = null }) {
+  // Slow totals are reused for a few minutes, since they barely change between page views.
+  const remembered = new Map();
+  const remember = (key, fn) => {
+    const hit = remembered.get(key);
+    if (hit && Date.now() - hit.at < 5 * 60000) return hit.value;
+    const value = fn();
+    remembered.set(key, { value, at: Date.now() });
+    return value;
+  };
   const limits = {
     loginAccount: new RateLimiter({ limit: 10, windowMs: 15 * 60000 }),
     // Many people can share one IP address, so these allow more than the per-account limit.
@@ -201,9 +210,10 @@ export function createApp({ db, config, importer = null, live = null }) {
     }
   }
 
-  const browse = (kind, lister, size) => (ctx) => {
+  const browse = (kind, lister, size, cached = false) => (ctx) => {
     const page = pageNumber(ctx.url);
-    send(ctx, views.browsePage(ctx, { kind, page, list: lister(db, { offset: (page - 1) * size }) }));
+    const load = () => lister(db, { offset: (page - 1) * size });
+    send(ctx, views.browsePage(ctx, { kind, page, list: cached ? remember(`${kind}-${page}`, load) : load() }));
   };
 
   const routes = [
@@ -212,7 +222,7 @@ export function createApp({ db, config, importer = null, live = null }) {
         albums: catalog.listAlbums(db, { limit: 12, releasedOnly: true }).items,
         charts: homeCharts(db),
         posts: withTopics(posts.recentPosts(db, 6)),
-        genres: catalog.listGenres(db, { limit: 24 }).items,
+        genres: remember('home-genres', () => catalog.listGenres(db, { limit: 24 }).items),
         loading: libraryLoading(db),
         counts: libraryCounts(db),
       }));
@@ -237,7 +247,7 @@ export function createApp({ db, config, importer = null, live = null }) {
     ['GET', /^\/api\/live$/, async (ctx) => {
       limit(limits.live, ctx.ip);
       const kind = ctx.url.searchParams.get('kind');
-      if (!live || !LIVE_KINDS.includes(kind)) return sendJson(ctx, { items: [] });
+      if (!live || !LIVE_KINDS.includes(kind) || ctx.fullCatalog) return sendJson(ctx, { items: [] });
       const stop = new AbortController();
       ctx.res.on('close', () => stop.abort());
       try {
@@ -286,7 +296,7 @@ export function createApp({ db, config, importer = null, live = null }) {
     ['GET', /^\/albums$/, browse('album', catalog.listAlbums, 24)],
     ['GET', /^\/songs$/, browse('song', catalog.listSongs, 40)],
     ['GET', /^\/artists$/, browse('artist', catalog.listArtists, 48)],
-    ['GET', /^\/genres$/, browse('genre', catalog.listGenres, 120)],
+    ['GET', /^\/genres$/, browse('genre', catalog.listGenres, 120, true)],
     ['GET', /^\/albums\/(\d+)$/, (ctx, id) => renderTopic(ctx, topicById('album', id))],
     ['GET', /^\/songs\/(\d+)$/, (ctx, id) => renderTopic(ctx, topicById('song', id))],
     ['GET', /^\/artists\/(\d+)$/, (ctx, id) => renderTopic(ctx, topicById('artist', id))],
@@ -409,6 +419,7 @@ export function createApp({ db, config, importer = null, live = null }) {
   return async function handle(req, res) {
     const ctx = { req, res, cookies: [], user: null, form: null };
     try {
+      ctx.fullCatalog = catalog.isFullCatalog(db);
       ctx.url = new URL(req.url, 'http://localhost');
       ctx.ip = clientIp(req);
       const cookies = parseCookies(req.headers.cookie);

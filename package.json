@@ -13,6 +13,7 @@
     "test": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"test/*.test.js\"",
     "seed:demo": "node --disable-warning=ExperimentalWarning scripts/seed-demo.js",
     "catalog:sync": "node --disable-warning=ExperimentalWarning scripts/catalog.js sync",
-    "catalog:import": "node --disable-warning=ExperimentalWarning scripts/catalog.js import"
+    "catalog:import": "node --disable-warning=ExperimentalWarning scripts/catalog.js import",
+    "catalog:full-import": "node --disable-warning=ExperimentalWarning --max-old-space-size=6144 scripts/full-import.js"
   }
 }

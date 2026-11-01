@@ -2,6 +2,8 @@
 // and refreshes pages that are waiting on music to be added.
 
 const LIVE_KINDS = ['artist', 'album', 'song'];
+// Once the whole catalog is on the site, its own search already covers everything.
+const FULL_CATALOG = 'fullCatalog' in document.body.dataset;
 
 document.addEventListener('error', (event) => {
   if (event.target instanceof HTMLImageElement) {
@@ -29,7 +31,8 @@ function resultContent(item) {
   const thumb = document.createElement('span');
   thumb.className = `thumb thumb-${item.kind || 'other'}`;
   thumb.setAttribute('aria-hidden', 'true');
-  if (item.kind === 'artist') thumb.textContent = item.name.trim().charAt(0).toUpperCase();
+  // The first letter shows when there's no picture, or if one fails to load.
+  thumb.textContent = item.name.trim().charAt(0).toUpperCase();
   if (item.cover) {
     const image = document.createElement('img');
     image.src = item.cover;
@@ -166,7 +169,7 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
       active = -1;
       runLocal(q, signal).catch(() => {});
     }, 60);
-    if (q.length >= 2) {
+    if (q.length >= 2 && !FULL_CATALOG) {
       liveTimer = setTimeout(() => runLive(q, signal), 300);
     }
   });

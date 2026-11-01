@@ -100,7 +100,7 @@ export function layout(ctx, { title, body, q = '', hero = false, status = 200 })
   <link rel="stylesheet" href="${assetUrl('/styles.css')}">
   <script src="${assetUrl('/app.js')}" defer></script>
 </head>
-<body>
+<body ${ctx.fullCatalog ? html`data-full-catalog` : ''}>
   <a class="skip" href="#main">Skip to content</a>
   <header class="site-header">
     <a class="logo" href="/" aria-label="TrackBuzz home">${logoMark}<span class="logo-word">Track<span>Buzz</span></span></a>
@@ -259,7 +259,7 @@ function popularSongs(songs) {
 }
 
 export function homePage(ctx, { albums, posts, genres, loading, counts, charts }) {
-  const number = (value) => value.toLocaleString('en-US');
+  const number = (value) => (value ?? 0).toLocaleString('en-US');
   return layout(ctx, {
     hero: true,
     body: html`
@@ -322,7 +322,7 @@ export function searchPage(ctx, { q, kind, results, page, importState }) {
         <button class="button button-small" type="submit">Add "${q}" to the library</button>
       </form></noscript>` : '';
   // Music not on the site yet joins the same list as the page loads, so there's one set of results.
-  const showLive = q && page === 1 && kind !== 'genre';
+  const showLive = q && page === 1 && kind !== 'genre' && !ctx.fullCatalog;
   const emptyText = html`<p class="empty-text">Nothing matches "${q}"${kind ? ` in ${KIND_PLURAL[kind].toLowerCase()}` : ''}. Check the spelling or try fewer words.</p>`;
   return layout(ctx, {
     title: q ? `Search: ${q}` : 'Search',

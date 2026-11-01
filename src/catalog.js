@@ -39,36 +39,95 @@ export function getGenreBySlug(db, slug) {
   return row ? { ...row, type: 'genre' } : null;
 }
 
+const KIND_ORDER = { artist: 0, genre: 1, album: 2, song: 3 };
+const CANDIDATES_PER_KIND = 100;
+
+const wordsIn = (text) => String(text).normalize('NFKC').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+
+// The last word may still be being typed, so it matches as a prefix. A single letter would mean reading
+// most of the index, so it's left out here, and search() checks it against the results instead.
 export function buildSearchQuery(text) {
-  const tokens = String(text).normalize('NFKC').match(/[\p{L}\p{N}]+/gu) || [];
-  if (!tokens.length) return null;
-  return tokens.slice(0, 8).map((token) => `"${token}"*`).join(' ');
+  const tokens = wordsIn(text).slice(0, 8);
+  const parts = tokens.map((token, index) => {
+    if (token.length > 1) return index === tokens.length - 1 ? `"${token}"*` : `"${token}"`;
+    return index === tokens.length - 1 ? null : `"${token}"`;
+  }).filter(Boolean);
+  if (!parts.length) return null;
+  return `{name context} : (${parts.join(' AND ')})`;
 }
 
-function hydrate(db, row) {
-  const topic = getTopic(db, row.kind, Number(row.ref_id));
-  return topic;
+export function isFullCatalog(db) {
+  return Boolean(db.prepare(`SELECT 1 FROM app_state WHERE key = 'full_import_at'`).get());
 }
 
-export function search(db, text, { kind = null, limit = 24, offset = 0 } = {}) {
-  const match = buildSearchQuery(text);
-  if (!match) return { items: [], counts: {}, hasMore: false };
-  const counts = {};
-  for (const row of db.prepare('SELECT kind, count(*) AS total FROM search_index WHERE search_index MATCH ? GROUP BY kind').all(match)) {
-    counts[row.kind] = row.total;
+const fold = (text) => String(text).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+function exactMatches(db, text, kind) {
+  const found = [];
+  if (!kind || kind === 'artist') {
+    found.push(...db.prepare(`SELECT 'artist' AS kind, id AS ref_id, name FROM artists WHERE name = ? COLLATE NOCASE ORDER BY popularity DESC LIMIT 5`).all(text));
   }
-  const rows = db.prepare(`
-    SELECT kind, ref_id FROM search_index
-    WHERE search_index MATCH ? AND (? IS NULL OR kind = ?)
-    ORDER BY (lower(name) = lower(?)) DESC,
-             CASE kind WHEN 'artist' THEN 0 WHEN 'genre' THEN 1 WHEN 'album' THEN 2 ELSE 3 END,
-             bm25(search_index, 0, 0, 10, 1)
-    LIMIT ? OFFSET ?
-  `).all(match, kind, kind, String(text).trim(), limit + 1, offset);
+  if (!kind || kind === 'album') {
+    found.push(...db.prepare(`SELECT 'album' AS kind, id AS ref_id, title AS name FROM albums WHERE title = ? COLLATE NOCASE ORDER BY popularity DESC LIMIT 5`).all(text));
+  }
+  return found;
+}
+
+// With one letter typed so far, show the most popular artists and albums that start with it.
+function firstLetterMatches(db, letter, kind, limit) {
+  const like = `${letter}%`;
+  const rows = [];
+  if (!kind || kind === 'artist') rows.push(...db.prepare(`SELECT 'artist' AS kind, id AS ref_id, name FROM artists WHERE name LIKE ? ORDER BY popularity DESC LIMIT ?`).all(like, limit));
+  if (!kind || kind === 'album') rows.push(...db.prepare(`SELECT 'album' AS kind, id AS ref_id, title AS name FROM albums WHERE title LIKE ? ORDER BY popularity DESC LIMIT ?`).all(like, limit));
+  return rows;
+}
+
+// Each kind is searched separately, so popular songs can't crowd out an artist or album.
+export function search(db, text, { kind = null, limit = 24, offset = 0 } = {}) {
+  const clean = String(text).trim();
+  const typed = wordsIn(clean);
+  if (!typed.length) return { items: [], hasMore: false };
+  if (typed.length === 1 && typed[0].length === 1) {
+    const rows = firstLetterMatches(db, typed[0], kind, offset + limit + 1);
+    return {
+      items: rows.slice(offset, offset + limit).map((row) => getTopic(db, row.kind, Number(row.ref_id))).filter(Boolean),
+      hasMore: rows.length > offset + limit,
+    };
+  }
+  const match = buildSearchQuery(clean);
+  if (!match) return { items: [], hasMore: false };
+  const statement = db.prepare('SELECT kind, ref_id, name FROM search_index WHERE search_index MATCH ? LIMIT ?');
+  const kinds = kind ? [kind] : Object.keys(KIND_ORDER);
+  const want = Math.max(CANDIDATES_PER_KIND, offset + limit + 1);
+  const rows = [...exactMatches(db, clean, kind)];
+  kinds.forEach((one) => rows.push(...statement.all(`kind : ${one} AND (${match})`, want)));
+  const target = fold(clean);
+  const words = target.match(/[\p{L}\p{N}]+/gu) || [];
+  const closeness = (name) => {
+    const folded = fold(name);
+    if (folded === target) return 0;
+    if (folded.startsWith(target)) return 1;
+    if (words.every((word) => folded.includes(word))) return 2;
+    return 3;
+  };
+  // A single unfinished letter at the end still has to start a word.
+  const lastWord = typed[typed.length - 1];
+  const startsLastWord = (row) => {
+    if (lastWord.length > 1) return true;
+    const foldedLetter = fold(lastWord);
+    return (fold(row.name).match(/[\p{L}\p{N}]+/gu) || []).some((word) => word.startsWith(foldedLetter));
+  };
+  const seen = new Set();
+  const ranked = rows.filter((row) => {
+    const key = `${row.kind}:${row.ref_id}`;
+    if (seen.has(key) || !startsLastWord(row)) return false;
+    seen.add(key);
+    return true;
+  }).map((row, index) => ({ row, index, close: closeness(row.name) }))
+    .sort((a, b) => a.close - b.close || (a.close === 3 ? a.index - b.index : KIND_ORDER[a.row.kind] - KIND_ORDER[b.row.kind] || a.index - b.index));
   return {
-    items: rows.slice(0, limit).map((row) => hydrate(db, row)).filter(Boolean),
-    counts,
-    hasMore: rows.length > limit,
+    items: ranked.slice(offset, offset + limit).map(({ row }) => getTopic(db, row.kind, Number(row.ref_id))).filter(Boolean),
+    hasMore: ranked.length > offset + limit,
   };
 }
 
@@ -82,11 +141,14 @@ const page = (rows, limit) => ({ items: rows.slice(0, limit), hasMore: rows.leng
 
 export function listAlbums(db, { limit = 24, offset = 0, releasedOnly = false } = {}) {
   const released = releasedOnly ? `WHERE release_date <= date('now')` : '';
-  return page(db.prepare(`${ALBUM_LIST} ${released} ORDER BY release_date IS NULL, release_date DESC, albums.id DESC LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+  return page(db.prepare(`${ALBUM_LIST} ${released} ORDER BY release_date DESC, albums.id DESC LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
 export function listSongs(db, { limit = 40, offset = 0 } = {}) {
-  return page(db.prepare(`${SONG_LIST} ORDER BY albums.release_date IS NULL, albums.release_date DESC, songs.album_id DESC, songs.disc, songs.position LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+  return page(db.prepare(`SELECT songs.id, songs.title AS name, songs.artist_id, songs.artist_credit, songs.duration_ms, songs.album_id, songs.disc, songs.position,
+      albums.title AS album_title, albums.cover_url, albums.release_date, 'song' AS type
+    FROM albums CROSS JOIN songs ON songs.album_id = albums.id
+    ORDER BY albums.release_date DESC, albums.id DESC, songs.disc, songs.position LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
 export function listArtists(db, { limit = 48, offset = 0 } = {}) {
@@ -106,12 +168,12 @@ export function albumSongs(db, albumId) {
 }
 
 export function artistAlbums(db, artistId) {
-  return db.prepare(`${ALBUM_LIST} WHERE albums.artist_id = ? ORDER BY release_date IS NULL, release_date DESC LIMIT 60`).all(artistId);
+  return db.prepare(`${ALBUM_LIST} WHERE albums.artist_id = ? ORDER BY release_date DESC LIMIT 60`).all(artistId);
 }
 
 export function genreAlbums(db, genreId, limit = 24) {
-  return db.prepare(`${ALBUM_LIST} JOIN album_genres ON album_genres.album_id = albums.id
-    WHERE album_genres.genre_id = ? ORDER BY release_date IS NULL, release_date DESC LIMIT ?`).all(genreId, limit);
+  return db.prepare(`${ALBUM_LIST} WHERE albums.id IN (SELECT album_id FROM album_genres WHERE genre_id = ? LIMIT 5000)
+    ORDER BY popularity DESC LIMIT ?`).all(genreId, limit);
 }
 
 export function genreArtists(db, genreId, limit = 24) {

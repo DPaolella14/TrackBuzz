@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { transaction } from './db.js';
-import { ensureGenre } from './catalog.js';
+import { ensureGenre, isFullCatalog } from './catalog.js';
 import { escapeLucene } from './musicbrainz.js';
 
 const ALLOWED_TYPES = new Set(['Album', 'EP', 'Single']);
@@ -260,7 +260,8 @@ export function artistImportPending(db, mbid) {
 }
 
 export function libraryCounts(db) {
-  return db.prepare('SELECT (SELECT count(*) FROM artists) AS artists, (SELECT count(*) FROM albums) AS albums, (SELECT count(*) FROM songs) AS songs').get();
+  // Row IDs make these instant at any size. Nothing is ever deleted from these tables.
+  return db.prepare('SELECT (SELECT max(id) FROM artists) AS artists, (SELECT max(id) FROM albums) AS albums, (SELECT max(id) FROM songs) AS songs').get();
 }
 
 export function libraryLoading(db) {
@@ -318,7 +319,7 @@ export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log =
     try {
       if (Date.now() - lastDiscoveryCheck > 3600000) {
         lastDiscoveryCheck = Date.now();
-        enqueueDiscovery(db);
+        if (!isFullCatalog(db)) enqueueDiscovery(db);
         // The home page charts are extras, so a failure here never stops imports.
         await refreshPopular().catch((err) => log(`Popular charts didn't update: ${err.message}`));
       }
@@ -336,7 +337,7 @@ export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log =
   };
   db.prepare(`UPDATE sync_runs SET status = 'failed', error = 'Interrupted by a restart', finished_at = datetime('now') WHERE status = 'running'`).run();
   db.prepare(`UPDATE import_queue SET status = 'pending', error = NULL WHERE status = 'failed'`).run();
-  const added = enqueueStarterCatalog(db);
+  const added = isFullCatalog(db) ? 0 : enqueueStarterCatalog(db);
   if (added) log(`Added ${added} artists to the import list.`);
   timer = setTimeout(tick, 2000);
   return () => { stopped = true; clearTimeout(timer); };

@@ -103,14 +103,11 @@ p { margin: 0 0 1em; }
 .suggestions a { display: flex; align-items: center; gap: 12px; padding: 7px 9px; border-radius: 9px; color: var(--text); text-decoration: none; }
 .suggestions a:hover, .suggestions [aria-selected="true"] a { background: var(--surface-3); }
 .suggest-status { padding: 9px 10px; color: var(--soft); font-size: 0.875rem; }
-.thumb { position: relative; flex: 0 0 44px; width: 44px; height: 44px; overflow: hidden; border-radius: 8px; background: var(--surface-3); }
-.thumb::after { content: ""; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: var(--soft); }
-.thumb-artist { border-radius: 50%; }
-.thumb-artist::after { display: none; }
-.thumb-artist { display: grid; place-items: center; background: var(--violet); color: var(--on-color); font-weight: 800; }
-.thumb-album::after { background: var(--pink); }
-.thumb-song::after { background: var(--teal); }
-.thumb-genre::after { background: var(--amber); }
+.thumb { position: relative; display: grid; place-items: center; flex: 0 0 44px; width: 44px; height: 44px; overflow: hidden; border-radius: 8px; color: var(--on-color); font-weight: 800; }
+.thumb-artist { border-radius: 50%; background: var(--violet); }
+.thumb-album { background: var(--pink); }
+.thumb-song { background: var(--teal); }
+.thumb-genre { background: var(--amber); }
 .thumb img { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; object-fit: cover; }
 .result-text { flex: 1; min-width: 0; }
 .result-text strong { display: block; overflow: hidden; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }

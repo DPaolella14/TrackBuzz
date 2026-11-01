@@ -1,4 +1,5 @@
 import { transaction } from './db.js';
+import { isFullCatalog } from './catalog.js';
 import { enqueueImport } from './importer.js';
 
 const BASE_URL = 'https://api.listenbrainz.org/1/stats/sitewide/';
@@ -71,10 +72,10 @@ export async function refreshCharts(db, { fetchImpl = fetch, userAgent = 'TrackB
         entries.forEach((entry, index) => insert.run(kind, index + 1, entry.name, entry.artist, entry.mbid, entry.cover));
       });
       refreshed += 1;
-      if (kind === 'artist') {
+      if (kind === 'artist' && !isFullCatalog(db)) {
         entries.slice(0, URGENT_ARTISTS).forEach((entry) => enqueueImport(db, 'artist_id', entry.mbid, { round: -1 }));
       }
-      if (kind === 'album') {
+      if (kind === 'album' && !isFullCatalog(db)) {
         entries.slice(0, URGENT_ALBUMS).forEach((entry) => enqueueImport(db, 'album', entry.mbid, { round: -1 }));
       }
     }

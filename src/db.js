@@ -195,6 +195,41 @@ const MIGRATIONS = [
   CREATE INDEX albums_artist_cover ON albums(artist_id, album_type, release_date);
   CREATE INDEX songs_mbid ON songs(mbid);
   `,
+  // Rebuilds search to stay fast at tens of millions of rows. Earlier rows are returned first.
+  `
+  DROP TRIGGER artists_ai; DROP TRIGGER albums_ai; DROP TRIGGER songs_ai; DROP TRIGGER genres_ai;
+  DROP TRIGGER artists_ad; DROP TRIGGER albums_ad; DROP TRIGGER songs_ad; DROP TRIGGER genres_ad;
+  DROP TABLE search_index;
+  CREATE VIRTUAL TABLE search_index USING fts5(
+    kind, ref_id UNINDEXED, name, context,
+    tokenize = 'unicode61 remove_diacritics 2', prefix = '2 3', detail = column, columnsize = 0
+  );
+  ALTER TABLE artists ADD COLUMN popularity INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE albums ADD COLUMN popularity INTEGER NOT NULL DEFAULT 0;
+  INSERT INTO search_index (kind, ref_id, name, context) SELECT 'artist', id, name, '' FROM artists;
+  INSERT INTO search_index (kind, ref_id, name, context) SELECT 'genre', id, name, '' FROM genres;
+  INSERT INTO search_index (kind, ref_id, name, context) SELECT 'album', id, title, artist_credit FROM albums;
+  INSERT INTO search_index (kind, ref_id, name, context) SELECT 'song', id, title, artist_credit FROM songs;
+  CREATE TRIGGER artists_search AFTER INSERT ON artists BEGIN
+    INSERT INTO search_index (kind, ref_id, name, context) VALUES ('artist', new.id, new.name, '');
+  END;
+  CREATE TRIGGER albums_search AFTER INSERT ON albums BEGIN
+    INSERT INTO search_index (kind, ref_id, name, context) VALUES ('album', new.id, new.title, new.artist_credit);
+  END;
+  CREATE TRIGGER songs_search AFTER INSERT ON songs BEGIN
+    INSERT INTO search_index (kind, ref_id, name, context) VALUES ('song', new.id, new.title, new.artist_credit);
+  END;
+  CREATE TRIGGER genres_search AFTER INSERT ON genres BEGIN
+    INSERT INTO search_index (kind, ref_id, name, context) VALUES ('genre', new.id, new.name, '');
+  END;
+  DROP INDEX albums_release;
+  CREATE INDEX albums_release ON albums(release_date DESC, id DESC);
+  CREATE INDEX albums_popularity ON albums(popularity DESC);
+  CREATE INDEX albums_title_nocase ON albums(title COLLATE NOCASE, popularity DESC);
+  CREATE INDEX artists_name_nocase ON artists(name COLLATE NOCASE, popularity DESC);
+  CREATE INDEX artists_popularity ON artists(popularity DESC);
+  CREATE TABLE app_state (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID;
+  `,
 ];
 
 export function openDb(path) {

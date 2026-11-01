@@ -12,7 +12,7 @@ export function loadConfig(env = process.env) {
     secureCookies: env.SECURE_COOKIES ? env.SECURE_COOKIES === '1' : production,
     catalogSync: env.CATALOG_SYNC !== 'off',
     syncEveryHours: Number(env.CATALOG_SYNC_HOURS || 24),
-    maxNewAlbumsPerSync: Number(env.CATALOG_MAX_NEW_PER_SYNC || 200),
+    maxNewAlbumsPerSync: Number(env.CATALOG_MAX_NEW_PER_SYNC || 1000),
     musicBrainzContact: env.MUSICBRAINZ_CONTACT || 'https://github.com/DPaolella14/TrackBuzz',
   };
 }

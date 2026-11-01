@@ -47,24 +47,51 @@ Run the tests with `npm test`.
 
 The library comes from [MusicBrainz](https://musicbrainz.org), with cover art from the [Cover Art Archive](https://coverartarchive.org). TrackBuzz stores song and album information only. It doesn't play audio, which would need separate music licensing.
 
-With `CATALOG_SYNC` on, the running server keeps the library current by itself:
+### Import the whole catalog
 
-1. **Bulk import:** it works through the artists in `catalog/starter-artists.txt`, plus popular artists from [ListenBrainz](https://listenbrainz.org). Every artist's first album is added before anyone's second, up to 40 per artist. Add names to the file at any time, then restart.
-2. **Every 24 hours:** it adds new albums, EPs, and singles, up to 200 per run, even while a bulk import is running. Each run looks back 7 days to catch releases that were entered late.
-3. **On demand:** search looks through all of MusicBrainz as people type. Opening a result adds it to the site right away, and opening an artist also queues their albums.
+This loads every artist, album, and song from MusicBrainz's public data files. It keeps your existing posts and links, and your site isn't changed until the new library is finished.
 
-The home page shows popular artists, albums, and songs from ListenBrainz, updated daily, and that music is imported first. Artist pictures use the cover of the artist's earliest studio album.
+Stop the site first, then check that your computer is ready:
 
-MusicBrainz allows one request per second, so a full starter import takes a while. An album takes about one second and an artist about three, so roughly 3,000 albums an hour at most. Searches go ahead of background imports, and MusicBrainz results arrive one type at a time over a few seconds. Library results appear instantly. If the site gets busy, this limit is the first thing you'll hit, and MetaBrainz's commercial plans or hosting your own MusicBrainz mirror are the ways past it. Change the limits in `.env` (see `.env.example`).
+```
+npm run catalog:full-import -- --check
+```
 
-To import by hand, stop the server first so the rate limit is respected:
+If it says you have enough space, run the import:
+
+```
+npm run catalog:full-import
+```
+
+Plan for several hours, mostly downloading and unpacking. Keep the computer awake. An interrupted download resumes, but an interruption after that means downloading again. When it finishes, run `npm start`. Your old library stays next to the new one as `trackbuzz.db.before-full-import`, and you can delete it once you're happy.
+
+Options:
+
+- `--work-dir=PATH` keeps temporary files on another drive. Set `DATABASE_PATH` too to keep the library there.
+- `--no-genres` skips genres. MusicBrainz licenses them for non-commercial use only, while the rest of the catalog is public domain. Use this if the site makes money, unless you have an arrangement with MetaBrainz.
+
+Search then runs on your own library and doesn't need MusicBrainz at all. MusicBrainz publishes new data files twice a week, and you can rerun the import any time.
+
+### Staying up to date
+
+With `CATALOG_SYNC` on, the running server adds new albums, EPs, and singles every 24 hours, up to 1,000 per run. Each run looks back 7 days to catch releases that were entered late.
+
+The home page shows popular artists, albums, and songs from [ListenBrainz](https://listenbrainz.org), updated daily.
+
+### Pictures
+
+Albums and songs show their cover from the Cover Art Archive. Artists show the cover of their earliest studio album. MusicBrainz has no artist photos and not every album has a cover, so anything without a picture shows a generated pattern or its first letter.
+
+### Before the full import
+
+Without a full import, the site adds music gradually: it works through `catalog/starter-artists.txt` and popular ListenBrainz artists at about 3,000 albums an hour at most, and searches MusicBrainz as people type. To add something by hand, stop the server first:
 
 ```
 npm run catalog:import -- "Radiohead"
 npm run catalog:sync
 ```
 
-**Before you make money from the site:** MusicBrainz's web service is free for non-commercial use. Commercial use, including ads or paid features, needs one of [MetaBrainz's plans](https://metabrainz.org/supporters) or an arrangement with them.
+**Before you make money from the site:** MusicBrainz's web service, used for daily updates, is free for non-commercial use. Commercial use, including ads or paid features, needs one of [MetaBrainz's plans](https://metabrainz.org/supporters) or an arrangement with them.
 
 ## Put it online
 
@@ -91,7 +118,9 @@ Serve the site over HTTPS, because login cookies are HTTPS-only in production. R
 | `src/auth.js` | Passwords, sessions, and rate limits |
 | `src/musicbrainz.js` | MusicBrainz client |
 | `src/live-search.js` | Search across all of MusicBrainz as people type |
-| `src/importer.js` | Imports and scheduled updates |
+| `src/importer.js` | Gradual imports and scheduled updates |
+| `src/full-import.js` | Imports the whole catalog from MusicBrainz's data files |
+| `src/charts.js` | Popular music for the home page |
 | `public/` | Styles and browser script |
 
 The app has no third-party packages. It uses Node's built-in web server and SQLite.
