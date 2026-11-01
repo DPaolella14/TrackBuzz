@@ -58,7 +58,7 @@ function placeholderArt(seed) {
 }
 
 function cover(item, size = 'medium') {
-  return html`<span class="cover cover-${size}">
+  return html`<span class="cover cover-${size} ${item.type === 'artist' ? 'cover-artist' : ''}">
     ${placeholderArt(`${item.type}:${item.id}:${item.name}`)}
     ${item.cover_url ? html`<img src="${item.cover_url}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
   </span>`;
@@ -120,7 +120,7 @@ export function layout(ctx, { title, body, q = '', hero = false, status = 200 })
   </header>
   <main id="main">${body}</main>
   <footer class="site-footer">
-    <p>Music information from <a href="https://musicbrainz.org" rel="noopener">MusicBrainz</a>, used under its data licenses. Cover art from the <a href="https://coverartarchive.org" rel="noopener">Cover Art Archive</a>.</p>
+    <p>Music information from <a href="https://musicbrainz.org" rel="noopener">MusicBrainz</a>, used under its data licenses. Cover art from the <a href="https://coverartarchive.org" rel="noopener">Cover Art Archive</a>. Popular music from <a href="https://listenbrainz.org" rel="noopener">ListenBrainz</a>.</p>
   </footer>
 </body>
 </html>`;
@@ -234,7 +234,31 @@ function pager(basePath, params, page, hasMore) {
   </nav>`;
 }
 
-export function homePage(ctx, { albums, posts, genres, loading, counts }) {
+function popularArtists(artists) {
+  return html`<ol class="artist-row">${artists.map((artist) => html`<li>
+    <a class="artist-tile" href="${artist.url}" rel="nofollow">${cover(artist)}<span class="tile-title">${artist.name}</span></a>
+  </li>`)}</ol>`;
+}
+
+function popularAlbums(albums) {
+  return html`<ol class="album-grid">${albums.map((album) => html`<li>
+    <a class="album-tile" href="${album.url}" rel="nofollow">
+      ${cover(album)}<span class="tile-title">${album.name}</span><span class="tile-meta">${album.artist_credit}</span>
+    </a>
+  </li>`)}</ol>`;
+}
+
+function popularSongs(songs) {
+  return html`<ol class="song-list popular-songs">${songs.map((song, index) => html`<li>
+    <a href="${song.url}" rel="nofollow">
+      <span class="song-number">${index + 1}</span>
+      ${cover(song, 'small')}
+      <span class="song-main"><span class="song-title">${song.name}</span><span class="tile-meta">${song.artist_credit}</span></span>
+    </a>
+  </li>`)}</ol>`;
+}
+
+export function homePage(ctx, { albums, posts, genres, loading, counts, charts }) {
   const number = (value) => value.toLocaleString('en-US');
   return layout(ctx, {
     hero: true,
@@ -246,6 +270,9 @@ export function homePage(ctx, { albums, posts, genres, loading, counts }) {
       ${counts.songs ? html`<p class="library-count">${number(counts.songs)} songs on ${number(counts.albums)} albums from ${number(counts.artists)} artists so far${loading ? ', with more added every minute' : ''}.</p>` : ''}
       <div class="hero-wave" aria-hidden="true">${Array.from({ length: 48 }, () => html`<span></span>`)}</div>
     </section>
+    ${charts.artists.length ? html`<section class="section"><h2>Popular artists</h2>${popularArtists(charts.artists)}</section>` : ''}
+    ${charts.songs.length ? html`<section class="section"><h2>Popular songs</h2>${popularSongs(charts.songs)}</section>` : ''}
+    ${charts.albums.length ? html`<section class="section"><h2>Popular albums</h2>${popularAlbums(charts.albums)}</section>` : ''}
     ${albums.length ? html`<section class="section">
       <div class="section-head"><h2>New releases</h2><a href="/albums">All albums</a></div>
       ${albumGrid(albums)}

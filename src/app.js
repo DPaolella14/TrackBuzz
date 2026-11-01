@@ -4,7 +4,8 @@ import {
   RateLimiter, SESSION_MAX_AGE, createSession, destroySession, hashPassword, userFromSession, validateSignup, verifyPassword,
 } from './auth.js';
 import * as catalog from './catalog.js';
-import { artistImportPending, enqueueImport, importStatus, libraryCounts, libraryLoading } from './importer.js';
+import { homeCharts } from './charts.js';
+import { artistImportPending, enqueueImport, importStatus, isWantedGroup, libraryCounts, libraryLoading } from './importer.js';
 import { LIVE_KINDS } from './live-search.js';
 import { INTERACTIVE } from './musicbrainz.js';
 import * as posts from './posts.js';
@@ -208,7 +209,8 @@ export function createApp({ db, config, importer = null, live = null }) {
   const routes = [
     ['GET', /^\/$/, (ctx) => {
       send(ctx, views.homePage(ctx, {
-        albums: catalog.listAlbums(db, { limit: 12 }).items,
+        albums: catalog.listAlbums(db, { limit: 12, releasedOnly: true }).items,
+        charts: homeCharts(db),
         posts: withTopics(posts.recentPosts(db, 6)),
         genres: catalog.listGenres(db, { limit: 24 }).items,
         loading: libraryLoading(db),
@@ -257,6 +259,17 @@ export function createApp({ db, config, importer = null, live = null }) {
     ['GET', new RegExp(`^/open/album/(${MBID})$`), async (ctx, mbid) => {
       const album = await openFromCatalog(ctx, () => importAlbum(mbid));
       redirect(ctx, `/albums/${album.id}`);
+    }],
+    ['GET', new RegExp(`^/open/recording/(${MBID})$`), async (ctx, recordingId) => {
+      const album = await openFromCatalog(ctx, async () => {
+        const recording = await importer.mb.lookupRecording(recordingId, INTERACTIVE);
+        const groups = (recording.releases || []).map((release) => release['release-group']).filter(Boolean);
+        const group = groups.find(isWantedGroup) || groups[0];
+        if (!group) throw new HttpError(404, 'Couldn\'t open that', 'No album is listed for this song yet.');
+        return importAlbum(group.id);
+      });
+      const song = db.prepare('SELECT id FROM songs WHERE album_id = ? AND mbid = ? LIMIT 1').get(album.id, recordingId);
+      redirect(ctx, song ? `/songs/${song.id}` : `/albums/${album.id}`);
     }],
     ['GET', new RegExp(`^/open/song/(${MBID})/(${MBID})$`), async (ctx, recordingId, groupId) => {
       const album = await openFromCatalog(ctx, () => importAlbum(groupId));

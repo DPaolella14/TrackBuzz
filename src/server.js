@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { purgeExpiredSessions } from './auth.js';
 import { createApp } from './app.js';
+import { chartsDue, refreshCharts } from './charts.js';
 import { loadConfig } from './config.js';
 import { openDb } from './db.js';
 import { Importer, startCatalogWorker } from './importer.js';
@@ -22,6 +23,9 @@ if (config.catalogSync) {
   stopWorker = startCatalogWorker(db, importer, {
     syncEveryHours: config.syncEveryHours,
     maxNew: config.maxNewAlbumsPerSync,
+    refreshPopular: async () => {
+      if (chartsDue(db)) await refreshCharts(db, { userAgent: mb.userAgent });
+    },
   });
 }
 

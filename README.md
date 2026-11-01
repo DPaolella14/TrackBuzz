@@ -53,6 +53,8 @@ With `CATALOG_SYNC` on, the running server keeps the library current by itself:
 2. **Every 24 hours:** it adds new albums, EPs, and singles, up to 200 per run, even while a bulk import is running. Each run looks back 7 days to catch releases that were entered late.
 3. **On demand:** search looks through all of MusicBrainz as people type. Opening a result adds it to the site right away, and opening an artist also queues their albums.
 
+The home page shows popular artists, albums, and songs from ListenBrainz, updated daily, and that music is imported first. Artist pictures use the cover of the artist's earliest studio album.
+
 MusicBrainz allows one request per second, so a full starter import takes a while. An album takes about one second and an artist about three, so roughly 3,000 albums an hour at most. Searches go ahead of background imports, and MusicBrainz results arrive one type at a time over a few seconds. Library results appear instantly. If the site gets busy, this limit is the first thing you'll hit, and MetaBrainz's commercial plans or hosting your own MusicBrainz mirror are the ways past it. Change the limits in `.env` (see `.env.example`).
 
 To import by hand, stop the server first so the rate limit is respected:

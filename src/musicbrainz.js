@@ -91,6 +91,10 @@ export class MusicBrainzClient {
     return this.get(`artist/${id}`, { inc: 'genres' }, options);
   }
 
+  lookupRecording(id, options) {
+    return this.get(`recording/${id}`, { inc: 'releases+release-groups' }, options);
+  }
+
   lookupReleaseGroup(id, options) {
     return this.get(`release-group/${id}`, { inc: 'artist-credits+genres' }, options);
   }

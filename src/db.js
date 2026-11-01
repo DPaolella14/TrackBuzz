@@ -181,6 +181,20 @@ const MIGRATIONS = [
   DROP TABLE import_queue_old;
   CREATE INDEX import_queue_next ON import_queue(status, round, rank, id);
   `,
+  `
+  CREATE TABLE charts (
+    kind TEXT NOT NULL CHECK (kind IN ('artist', 'album', 'song')),
+    position INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    artist_name TEXT NOT NULL,
+    mbid TEXT NOT NULL,
+    cover_url TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (kind, position)
+  );
+  CREATE INDEX albums_artist_cover ON albums(artist_id, album_type, release_date);
+  CREATE INDEX songs_mbid ON songs(mbid);
+  `,
 ];
 
 export function openDb(path) {

@@ -1,5 +1,9 @@
 export const TOPIC_TYPES = ['album', 'song', 'artist', 'genre'];
 
+// An artist's picture is the cover of their earliest studio album.
+const ARTIST_PICTURE = `(SELECT cover_url FROM albums WHERE albums.artist_id = artists.id AND cover_url IS NOT NULL
+  ORDER BY (album_type = 'Album') DESC, release_date IS NULL, release_date LIMIT 1) AS cover_url`;
+
 export function slugify(name) {
   return name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '') || 'genre';
@@ -22,7 +26,7 @@ export function getTopic(db, type, id) {
     song: `SELECT songs.id, songs.title AS name, songs.artist_id, songs.artist_credit, songs.duration_ms,
                   songs.album_id, albums.title AS album_title, albums.cover_url, albums.release_date
            FROM songs JOIN albums ON albums.id = songs.album_id WHERE songs.id = ?`,
-    artist: 'SELECT id, mbid, name, country, artist_type, begin_year FROM artists WHERE id = ?',
+    artist: `SELECT id, mbid, name, country, artist_type, begin_year, ${ARTIST_PICTURE} FROM artists WHERE id = ?`,
     genre: 'SELECT id, name, slug FROM genres WHERE id = ?',
   };
   if (!queries[type]) return null;
@@ -76,8 +80,9 @@ const ALBUM_LIST = `SELECT albums.id, albums.title AS name, albums.artist_id, al
 
 const page = (rows, limit) => ({ items: rows.slice(0, limit), hasMore: rows.length > limit });
 
-export function listAlbums(db, { limit = 24, offset = 0 } = {}) {
-  return page(db.prepare(`${ALBUM_LIST} ORDER BY release_date IS NULL, release_date DESC, albums.id DESC LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+export function listAlbums(db, { limit = 24, offset = 0, releasedOnly = false } = {}) {
+  const released = releasedOnly ? `WHERE release_date <= date('now')` : '';
+  return page(db.prepare(`${ALBUM_LIST} ${released} ORDER BY release_date IS NULL, release_date DESC, albums.id DESC LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
 export function listSongs(db, { limit = 40, offset = 0 } = {}) {
@@ -85,7 +90,7 @@ export function listSongs(db, { limit = 40, offset = 0 } = {}) {
 }
 
 export function listArtists(db, { limit = 48, offset = 0 } = {}) {
-  return page(db.prepare(`SELECT id, name, country, artist_type, begin_year, 'artist' AS type FROM artists ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+  return page(db.prepare(`SELECT id, name, country, artist_type, begin_year, ${ARTIST_PICTURE}, 'artist' AS type FROM artists ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
 export function listGenres(db, { limit = 120, offset = 0 } = {}) {
@@ -110,7 +115,7 @@ export function genreAlbums(db, genreId, limit = 24) {
 }
 
 export function genreArtists(db, genreId, limit = 24) {
-  return db.prepare(`SELECT artists.id, artists.name, 'artist' AS type FROM artists
+  return db.prepare(`SELECT artists.id, artists.name, ${ARTIST_PICTURE}, 'artist' AS type FROM artists
     JOIN artist_genres ON artist_genres.artist_id = artists.id
     WHERE artist_genres.genre_id = ? ORDER BY artists.name COLLATE NOCASE LIMIT ?`).all(genreId, limit);
 }

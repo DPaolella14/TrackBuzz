@@ -1,3 +1,4 @@
+import { getTopic } from './catalog.js';
 import { creditText, isWantedGroup } from './importer.js';
 import { INTERACTIVE, escapeLucene } from './musicbrainz.js';
 
@@ -57,6 +58,11 @@ export class LiveSearch {
 
   localId(table, mbid) {
     return this.db.prepare(`SELECT id FROM ${table} WHERE mbid = ?`).get(mbid)?.id;
+  }
+
+  artistPicture(mbid) {
+    const id = this.localId('artists', mbid);
+    return id ? getTopic(this.db, 'artist', id)?.cover_url ?? null : null;
   }
 
   // Music already on the site links straight to its page. Anything else is added when opened.
@@ -135,7 +141,7 @@ export class LiveSearch {
       kind: item.kind,
       name: item.name,
       context: item.context,
-      cover: item.cover || null,
+      cover: item.cover || (item.kind === 'artist' ? this.artistPicture(item.mbid) : null),
       url: {
         artist: () => this.linkArtist(item.mbid),
         album: () => this.linkAlbum(item.mbid),

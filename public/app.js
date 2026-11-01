@@ -29,6 +29,7 @@ function resultContent(item) {
   const thumb = document.createElement('span');
   thumb.className = `thumb thumb-${item.kind || 'other'}`;
   thumb.setAttribute('aria-hidden', 'true');
+  if (item.kind === 'artist') thumb.textContent = item.name.trim().charAt(0).toUpperCase();
   if (item.cover) {
     const image = document.createElement('img');
     image.src = item.cover;

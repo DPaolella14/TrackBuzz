@@ -305,7 +305,7 @@ export async function processNextImport(db, importer, { maxRound = null } = {}) 
 }
 
 // Runs inside the web server so all MusicBrainz calls share one rate limit.
-export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log = console.log }) {
+export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log = console.log, refreshPopular = async () => {} }) {
   let stopped = false;
   let timer;
   let lastDiscoveryCheck = 0;
@@ -319,6 +319,8 @@ export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log =
       if (Date.now() - lastDiscoveryCheck > 3600000) {
         lastDiscoveryCheck = Date.now();
         enqueueDiscovery(db);
+        // The home page charts are extras, so a failure here never stops imports.
+        await refreshPopular().catch((err) => log(`Popular charts didn't update: ${err.message}`));
       }
       // New releases keep arriving during a long import, once the library has its first albums.
       if (syncDue() && (libraryCounts(db).albums >= SYNC_WAITS_FOR_ALBUMS || !libraryLoading(db))) {

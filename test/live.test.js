@@ -34,6 +34,10 @@ function fakeMb() {
     lookupReleaseGroup: async (id) => { calls.push(`lookupGroup:${id}`); return groupFor(id); },
     browseReleases: async () => ({ releases: [{ date: '2000-10-02', media: [{ position: 1, tracks: [{ position: 1, title: 'Everything Test', length: 251000, recording: { id: RECORDING } }, { position: 2, title: 'Other Song', recording: { id: 'rec-2' } }] }] }] }),
     browseArtistReleaseGroups: async () => ({ 'release-groups': [] }),
+    lookupRecording: async () => ({ id: RECORDING, releases: [
+      { 'release-group': { id: COMPILATION, 'primary-type': 'Album', 'secondary-types': ['Compilation'] } },
+      { 'release-group': { id: GROUP, 'primary-type': 'Album' } },
+    ] }),
   };
 }
 
@@ -103,6 +107,13 @@ describe('opening a result', () => {
     assert.equal(JSON.parse((await client.get('/api/suggest?q=everything')).text).items[0].url, location);
   });
 
+  it('opens a popular song from its recording, skipping compilations', async () => {
+    const client = new Client(base);
+    const opened = await client.request(`/open/recording/${RECORDING}`);
+    assert.match(opened.headers.get('location'), /^\/songs\/\d+$/);
+    assert.equal(db.prepare('SELECT mbid FROM albums').all().filter((row) => row.mbid === GROUP).length, 1);
+  });
+
   it('adds a compilation when someone asks for that exact one', async () => {
     const opened = await new Client(base).request(`/open/album/${COMPILATION}`);
     assert.match(opened.headers.get('location'), /^\/albums\/\d+$/);
@@ -167,7 +178,7 @@ describe('upgrading an existing database', () => {
   it('keeps queued imports', () => {
     const db = openDb(':memory:');
     db.prepare(`INSERT INTO import_queue (kind, term, term_key) VALUES ('artist_id', 'x', 'x')`).run();
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
     assert.equal(db.prepare('SELECT count(*) AS n FROM import_queue').get().n, 1);
   });
 });

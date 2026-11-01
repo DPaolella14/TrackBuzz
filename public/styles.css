@@ -106,7 +106,8 @@ p { margin: 0 0 1em; }
 .thumb { position: relative; flex: 0 0 44px; width: 44px; height: 44px; overflow: hidden; border-radius: 8px; background: var(--surface-3); }
 .thumb::after { content: ""; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; margin: -6px; border-radius: 50%; background: var(--soft); }
 .thumb-artist { border-radius: 50%; }
-.thumb-artist::after { background: var(--violet); }
+.thumb-artist::after { display: none; }
+.thumb-artist { display: grid; place-items: center; background: var(--violet); color: var(--on-color); font-weight: 800; }
 .thumb-album::after { background: var(--pink); }
 .thumb-song::after { background: var(--teal); }
 .thumb-genre::after { background: var(--amber); }
@@ -149,6 +150,14 @@ p { margin: 0 0 1em; }
 .cover-small { flex: 0 0 48px; width: 48px; border-radius: 8px; }
 .cover-large { flex: 0 0 auto; width: clamp(160px, 24vw, 280px); border-radius: var(--radius); box-shadow: 0 20px 60px rgb(0 0 0 / 50%); }
 
+.cover-artist { border-radius: 50%; }
+.artist-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 130px), 1fr)); gap: 22px 18px; }
+.artist-tile { display: block; color: var(--text); text-align: center; text-decoration: none; }
+.artist-tile .cover { margin-bottom: 9px; transition: transform 140ms ease-out; }
+.artist-tile:hover { color: var(--text); }
+.artist-tile:hover .cover { transform: translateY(-3px); }
+.popular-songs { columns: 2 340px; column-gap: 32px; }
+.popular-songs li { break-inside: avoid; }
 .album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 26px 20px; }
 .album-tile { display: block; color: var(--text); text-decoration: none; }
 .album-tile .cover { margin-bottom: 10px; transition: transform 140ms ease-out; }
@@ -293,5 +302,5 @@ textarea { margin-bottom: 12px; resize: vertical; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hero-wave span { animation: none; }
-  .album-tile .cover { transition: none; }
+  .album-tile .cover, .artist-tile .cover { transition: none; }
 }
