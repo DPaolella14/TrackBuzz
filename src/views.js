@@ -239,7 +239,7 @@ export function homePage(ctx, { albums, posts, genres, loading }) {
     hero: true,
     body: html`
     <section class="hero">
-      <h1>What's the story behind your song?</h1>
+      <h1>What's the story behind your music?</h1>
       <p>Find any album, song, artist, or genre. Then share a personal story, a concert memory, a performance tip, or a rating.</p>
       ${searchForm('home-search')}
       <div class="hero-wave" aria-hidden="true">${Array.from({ length: 48 }, () => html`<span></span>`)}</div>

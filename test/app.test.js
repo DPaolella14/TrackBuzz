@@ -219,9 +219,9 @@ describe('posting rules', () => {
 });
 
 describe('home page', () => {
-  it('asks for the story behind your song', async () => {
+  it('asks for the story behind your music', async () => {
     const { text } = await new Client(app.base).get('/');
-    assert.ok(text.includes("What's the story behind your song?"));
+    assert.ok(text.includes("What's the story behind your music?"));
   });
 });
 
