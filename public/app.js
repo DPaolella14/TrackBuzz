@@ -141,7 +141,7 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
       }
     }
     if (signal.aborted) return;
-    if (failed) setStatus('Some results are missing because MusicBrainz didn\'t respond. Try again in a moment.');
+    if (failed) setStatus('Some results couldn\'t load. Try again in a moment.');
     else setStatus(options().length ? '' : `No matches for "${q}" yet. Keep typing or check the spelling.`);
   }
 
@@ -198,28 +198,35 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
 const livePanel = document.querySelector('[data-live-results]');
 if (livePanel) {
   const q = livePanel.dataset.liveResults;
+  const target = q.trim().toLowerCase();
   const list = livePanel.querySelector('.result-list');
   const note = livePanel.querySelector('.live-status');
-  const seen = new Set([...document.querySelectorAll('.result-list a')].map((link) => link.getAttribute('href')));
+  const seen = new Set([...list.querySelectorAll('a')].map((link) => link.getAttribute('href')));
+  let failed = false;
+  note.textContent = 'Searching';
   (async () => {
-    for (const kind of LIVE_KINDS) {
-      const items = await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`);
-      for (const item of items) {
-        if (!seen.has(item.url)) {
-          seen.add(item.url);
-          const li = document.createElement('li');
-          const link = document.createElement('a');
-          link.className = 'result';
-          link.href = item.url;
-          link.rel = 'nofollow';
-          link.append(...resultContent(item));
-          li.append(link);
-          list.append(li);
+    for (const kind of livePanel.dataset.liveKinds.split(',')) {
+      try {
+        for (const item of await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`)) {
+          if (!seen.has(item.url)) {
+            seen.add(item.url);
+            const li = document.createElement('li');
+            const link = document.createElement('a');
+            link.className = 'result';
+            link.href = item.url;
+            link.rel = 'nofollow';
+            link.append(...resultContent(item));
+            li.append(link);
+            // An exact name is almost certainly what the person meant, so it goes to the top.
+            if (item.name.toLowerCase() === target) list.prepend(li);
+            else list.append(li);
+          }
         }
+      } catch {
+        failed = true;
       }
     }
-    note.textContent = list.children.length ? '' : 'MusicBrainz has no other matches.';
-  })().catch(() => {
-    note.textContent = 'MusicBrainz isn\'t responding. Try again in a moment.';
-  });
+    if (failed) note.textContent = 'Some results couldn\'t load. Try again in a moment.';
+    else note.textContent = list.children.length ? '' : `Nothing matches "${q}". Check the spelling or try fewer words.`;
+  })();
 }

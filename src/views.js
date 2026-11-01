@@ -287,33 +287,31 @@ export function suggestionItem(item) {
 
 export function searchPage(ctx, { q, kind, results, page, importState }) {
   const filters = [['', 'All'], ...Object.keys(KIND_PLURAL).map((key) => [key, KIND_PLURAL[key]])];
-  const total = Object.values(results.counts).reduce((sum, count) => sum + count, 0);
   const searchMore = !q ? '' : importState === 'pending'
-    ? html`<p class="import-note" role="status">Looking for "${q}" on MusicBrainz. Anything found will appear here in a few minutes.</p>`
+    ? html`<p class="import-note" role="status">Looking for "${q}". Anything found will appear here in a few minutes.</p>`
     : ctx.user ? html`<noscript><form class="import-note" action="/catalog/request" method="post">
         ${csrfField(ctx)}<input type="hidden" name="q" value="${q}">
         <span>Can't find what you're looking for?</span>
         <button class="button button-small" type="submit">Add "${q}" to the library</button>
       </form></noscript>` : '';
-  const showLive = q && !kind && page === 1;
+  // Music not on the site yet joins the same list as the page loads, so there's one set of results.
+  const showLive = q && page === 1 && kind !== 'genre';
+  const emptyText = html`<p class="empty-text">Nothing matches "${q}"${kind ? ` in ${KIND_PLURAL[kind].toLowerCase()}` : ''}. Check the spelling or try fewer words.</p>`;
   return layout(ctx, {
     title: q ? `Search: ${q}` : 'Search',
     q,
     body: html`<section class="section">
       <h1 class="page-title">${q ? `Results for "${q}"` : 'Search'}</h1>
       ${q ? html`<ul class="filters">${filters.map(([key, label]) => {
-    const count = key ? (results.counts[key] || 0) : total;
     const params = new URLSearchParams({ q, ...(key ? { type: key } : {}) });
-    return html`<li><a href="/search?${params}" ${kind === (key || null) ? html`aria-current="page"` : ''}>${label} (${count})</a></li>`;
+    return html`<li><a href="/search?${params}" ${kind === (key || null) ? html`aria-current="page"` : ''}>${label}</a></li>`;
   })}</ul>` : html`<p>Enter an album, song, artist, or genre in the search bar.</p>`}
-      ${results.items.length ? html`<ul class="result-list">${results.items.map(resultRow)}</ul>`
-    : q ? html`<p class="empty-text">Nothing in the library matches "${q}"${kind ? ` in ${KIND_PLURAL[kind].toLowerCase()}` : ''}.</p>` : ''}
+      ${showLive ? html`<div data-live-results="${q}" data-live-kinds="${kind || 'artist,album,song'}">
+        <ul class="result-list">${results.items.map(resultRow)}</ul>
+        <p class="live-status" role="status"></p>
+        ${results.items.length ? '' : html`<noscript>${emptyText}</noscript>`}
+      </div>` : html`${results.items.length ? html`<ul class="result-list">${results.items.map(resultRow)}</ul>` : q ? emptyText : ''}`}
       ${pager('/search', { q, ...(kind ? { type: kind } : {}) }, page, results.hasMore)}
-      ${showLive ? html`<section class="live-section" data-live-results="${q}">
-        <h2>More from MusicBrainz</h2>
-        <ul class="result-list"></ul>
-        <p class="live-status" role="status">Searching all music</p>
-      </section>` : ''}
       ${searchMore}
     </section>`,
   });

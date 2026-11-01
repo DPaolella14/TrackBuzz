@@ -184,7 +184,7 @@ export function createApp({ db, config, importer = null, live = null }) {
   async function importAlbum(mbid) {
     await importer.importReleaseGroup(mbid, OPEN_OPTIONS);
     const album = db.prepare('SELECT id FROM albums WHERE mbid = ?').get(mbid);
-    if (!album) throw new HttpError(404, 'Couldn\'t open that', 'MusicBrainz has no track listing for this release yet.');
+    if (!album) throw new HttpError(404, 'Couldn\'t open that', 'No track listing is available for this release yet.');
     return album;
   }
 
@@ -196,7 +196,7 @@ export function createApp({ db, config, importer = null, live = null }) {
     } catch (err) {
       if (err instanceof HttpError) throw err;
       console.error(`Opening from MusicBrainz failed: ${err.message}`);
-      throw new HttpError(503, 'Couldn\'t reach MusicBrainz', 'MusicBrainz isn\'t responding. Go back and try again in a moment.');
+      throw new HttpError(503, 'Couldn\'t open that', 'The music service isn\'t responding. Go back and try again in a moment.');
     }
   }
 

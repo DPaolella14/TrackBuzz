@@ -175,9 +175,10 @@ p { margin: 0 0 1em; }
 .filters a { display: block; padding: 5px 13px; border-radius: 999px; color: var(--soft); font-size: 0.9rem; text-decoration: none; }
 .filters a:hover { background: var(--surface); color: var(--text); }
 .filters a[aria-current="page"] { background: var(--text); color: var(--on-color); font-weight: 600; }
-.live-section { margin-top: 28px; }
-.live-section h2 { margin-bottom: 8px; font-size: 1.15rem; }
+.result-list + .live-status { margin-top: 14px; }
 .live-status { color: var(--soft); font-size: 0.9rem; }
+.live-status:empty { display: none; }
+.result .thumb { flex-basis: 48px; width: 48px; height: 48px; }
 .import-note { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 24px 0 0; padding: 14px 16px; border-radius: var(--radius); background: var(--surface); }
 .pager { display: flex; justify-content: space-between; gap: 16px; padding: 22px 0 0; }
 .pager [rel="next"] { margin-left: auto; }
