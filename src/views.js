@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { assetUrl } from './assets.js';
 import { html } from './html.js';
 import { TABS, MAX_BODY } from './posts.js';
 import { topicUrl } from './catalog.js';
@@ -93,9 +94,9 @@ export function layout(ctx, { title, body, q = '', hero = false, status = 200 })
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${fullTitle}</title>
   <meta name="description" content="Share personal stories, concert memories, performance tips, and ratings for any album, song, artist, or genre.">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="icon" href="${assetUrl('/favicon.svg')}" type="image/svg+xml">
+  <link rel="stylesheet" href="${assetUrl('/styles.css')}">
+  <script src="${assetUrl('/app.js')}" defer></script>
 </head>
 <body>
   <a class="skip" href="#main">Skip to content</a>

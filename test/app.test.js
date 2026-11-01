@@ -218,6 +218,19 @@ describe('posting rules', () => {
   });
 });
 
+describe('browser caching', () => {
+  it('gives files a fingerprinted URL, so an update reaches browsers right away', async () => {
+    const client = new Client(app.base);
+    const { text } = await client.get('/');
+    const url = text.match(/href="(\/styles\.css\?v=[0-9a-f]{12})"/)?.[1];
+    assert.ok(url, 'stylesheet URL has a fingerprint');
+    assert.match(text, /src="\/app\.js\?v=[0-9a-f]{12}"/);
+    assert.match((await client.request(url)).headers.get('cache-control'), /immutable/);
+    assert.equal((await client.request('/styles.css')).headers.get('cache-control'), 'no-cache');
+    assert.equal((await client.request('/styles.css?v=old')).headers.get('cache-control'), 'no-cache');
+  });
+});
+
 describe('library requests', () => {
   it('queues a missing search once and shows that it is pending', async () => {
     const client = await signedIn();

@@ -1,7 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
-import { extname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { STATIC_FILES, assetCacheControl } from './assets.js';
 import {
   RateLimiter, SESSION_MAX_AGE, createSession, destroySession, hashPassword, userFromSession, validateSignup, verifyPassword,
 } from './auth.js';
@@ -13,11 +11,6 @@ import * as posts from './posts.js';
 import * as views from './views.js';
 
 const MAX_FORM_BYTES = 64 * 1024;
-const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
-const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
-const STATIC_FILES = new Map(readdirSync(PUBLIC_DIR).map((name) => [
-  `/${name}`, { body: readFileSync(join(PUBLIC_DIR, name)), type: MIME[extname(name)] || 'application/octet-stream' },
-]));
 const SECURITY_HEADERS = {
   'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
@@ -416,7 +409,7 @@ export function createApp({ db, config, importer = null, live = null }) {
       const method = req.method === 'HEAD' ? 'GET' : req.method;
       const asset = method === 'GET' && STATIC_FILES.get(ctx.url.pathname);
       if (asset) {
-        res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': asset.type, 'Cache-Control': 'public, max-age=3600' });
+        res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': asset.type, 'Cache-Control': assetCacheControl(asset, ctx.url.searchParams.get('v')) });
         res.end(asset.body);
         return;
       }

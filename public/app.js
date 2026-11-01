@@ -49,8 +49,10 @@ function resultContent(item) {
 
 async function fetchItems(path, signal) {
   const response = await fetch(path, { signal });
-  if (!response.ok) return [];
-  return (await response.json()).items || [];
+  if (!response.ok) throw new Error(`Search answered ${response.status}`);
+  const data = await response.json();
+  if (data.unavailable) throw new Error('MusicBrainz is unavailable');
+  return data.items || [];
 }
 
 for (const form of document.querySelectorAll('form[data-suggest]')) {
@@ -128,13 +130,19 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
 
   async function runLive(q, signal) {
     setStatus('Searching all music');
+    let failed = false;
     for (const kind of LIVE_KINDS) {
       if (signal.aborted) return;
-      const items = await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`, signal);
-      if (!signal.aborted) addItems(items);
+      try {
+        const items = await fetchItems(`/api/live?kind=${kind}&q=${encodeURIComponent(q)}`, signal);
+        if (!signal.aborted) addItems(items);
+      } catch {
+        failed = true;
+      }
     }
     if (signal.aborted) return;
-    setStatus(options().length ? '' : `No matches for "${q}" yet. Keep typing or check the spelling.`);
+    if (failed) setStatus('Some results are missing because MusicBrainz didn\'t respond. Try again in a moment.');
+    else setStatus(options().length ? '' : `No matches for "${q}" yet. Keep typing or check the spelling.`);
   }
 
   input.addEventListener('input', () => {
@@ -158,9 +166,7 @@ for (const form of document.querySelectorAll('form[data-suggest]')) {
       runLocal(q, signal).catch(() => {});
     }, 60);
     if (q.length >= 2) {
-      liveTimer = setTimeout(() => runLive(q, signal).catch(() => {
-        if (!signal.aborted) setStatus('');
-      }), 300);
+      liveTimer = setTimeout(() => runLive(q, signal), 300);
     }
   });
   input.addEventListener('keydown', (event) => {
