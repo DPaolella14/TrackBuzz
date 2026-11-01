@@ -8,6 +8,22 @@ const SKIPPED_SECONDARY_TYPES = new Set(['Compilation', 'DJ-mix', 'Mixtape/Stree
 const SEARCH_MATCH_SCORE = 90;
 const ARTIST_ALBUM_LIMIT = 40;
 const REFRESH_OVERLAP_DAYS = 7;
+const LISTENBRAINZ_URL = 'https://api.listenbrainz.org/1/stats/sitewide/artists';
+const LISTENBRAINZ_RANGES = ['all_time', 'year', 'quarter', 'month'];
+const LISTENBRAINZ_MAX_OFFSET = 1000;
+const LISTENBRAINZ_PAGE = 100;
+const SYNC_WAITS_FOR_ALBUMS = 1000;
+const OFFLINE_WAIT_MS = 5 * 60000;
+const MAX_TRIES = 3;
+
+// Several artists can share a name. The one with the most listener tags is usually the one meant.
+export function chooseArtist(artists, name) {
+  const target = String(name).trim().toLowerCase();
+  const close = (artists || []).filter((artist) => (artist.score ?? 0) >= SEARCH_MATCH_SCORE);
+  const exact = close.filter((artist) => artist.name?.toLowerCase() === target);
+  const tagTotal = (artist) => (artist.tags || []).reduce((sum, tag) => sum + (tag.count ?? 1), 0);
+  return [...(exact.length ? exact : close)].sort((a, b) => tagTotal(b) - tagTotal(a))[0] || null;
+}
 
 export function creditText(credits) {
   return (credits || []).map((part) => `${part.name ?? part.artist?.name ?? ''}${part.joinphrase ?? ''}`).join('').trim();
@@ -46,6 +62,7 @@ export class Importer {
     this.db = db;
     this.mb = mb;
     this.log = log;
+    this.failedTries = new Map();
   }
 
   albumExists(mbid) {
@@ -69,9 +86,10 @@ export class Importer {
 
   // Returns true when a new album was stored. With force, a person asked for this exact release,
   // so it's stored even if it's a type the automatic imports skip.
-  async importReleaseGroup(mbid, { force = false, ...options } = {}) {
+  // A group from an artist's album list already has its details, which saves one request.
+  async importReleaseGroup(mbid, { force = false, group: known = null, ...options } = {}) {
     if (this.albumExists(mbid)) return false;
-    const group = await this.mb.lookupReleaseGroup(mbid, options);
+    const group = known?.['artist-credit'] ? known : await this.mb.lookupReleaseGroup(mbid, options);
     if (!force && !isWantedGroup(group)) return false;
     const { releases } = await this.mb.browseReleases(mbid, options);
     const release = chooseRelease(releases);
@@ -98,28 +116,60 @@ export class Importer {
     });
   }
 
-  async importArtistByName(name) {
-    const { artists = [] } = await this.mb.searchArtists(`artist:"${escapeLucene(name)}"`, 1);
-    const match = artists[0];
-    if (!match || (match.score ?? 0) < SEARCH_MATCH_SCORE) return 0;
-    return this.importArtistById(match.id, match);
+  async importArtistByName(name, job = {}) {
+    const { artists = [] } = await this.mb.searchArtists(`artist:"${escapeLucene(name)}"`, 10);
+    const match = chooseArtist(artists, name);
+    if (!match) return 0;
+    return this.importArtistById(match.id, job, match);
   }
 
-  async importArtistById(mbid, artist = { id: mbid }) {
+  // Adds the artist now and queues their albums. Each artist's first album is added before anyone's
+  // second album, so the library gets wide quickly instead of deep on the first few artists.
+  async importArtistById(mbid, job = {}, artist = { id: mbid }) {
     await this.ensureArtist(artist);
-    let added = 0;
     const { 'release-groups': groups = [] } = await this.mb.browseArtistReleaseGroups(mbid);
     const wanted = groups.filter(isWantedGroup).sort((a, b) => Number(b['primary-type'] === 'Album') - Number(a['primary-type'] === 'Album')
       || String(b['first-release-date'] || '').localeCompare(String(a['first-release-date'] || '')));
-    for (const group of wanted.slice(0, ARTIST_ALBUM_LIMIT)) {
-      if (await this.importReleaseGroup(group.id)) added += 1;
+    let queued = 0;
+    for (const [index, group] of wanted.slice(0, ARTIST_ALBUM_LIMIT).entries()) {
+      if (!this.albumExists(group.id)) {
+        enqueueImport(this.db, 'album', group.id, {
+          round: (job.round ?? 0) < 0 ? -1 : index,
+          rank: job.id ?? 0,
+          payload: JSON.stringify(group),
+        });
+        queued += 1;
+      }
     }
+    return queued;
+  }
+
+  // Finds popular artists from what ListenBrainz users actually listen to.
+  async discoverPopularArtists({ fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }) } = {}) {
+    let added = 0;
+    for (const range of LISTENBRAINZ_RANGES) {
+      for (let offset = 0; offset < LISTENBRAINZ_MAX_OFFSET; offset += LISTENBRAINZ_PAGE) {
+        const url = `${LISTENBRAINZ_URL}?range=${range}&count=${LISTENBRAINZ_PAGE}&offset=${offset}`;
+        const response = await fetchImpl(url, { headers: { 'User-Agent': this.mb.userAgent || 'TrackBuzz' }, signal: AbortSignal.timeout(30000) });
+        if (response.status === 204) break;
+        if (!response.ok) throw Object.assign(new Error(`ListenBrainz answered ${response.status}`), { permanent: response.status < 500 && response.status !== 429 });
+        const artists = (await response.json()).payload?.artists || [];
+        for (const artist of artists) {
+          const mbid = artist.artist_mbid;
+          if (mbid && !this.db.prepare('SELECT 1 FROM artists WHERE mbid = ?').get(mbid)
+            && enqueueImport(this.db, 'artist_id', mbid, { round: 0 })) added += 1;
+        }
+        if (artists.length < LISTENBRAINZ_PAGE) break;
+        await sleep(1000);
+      }
+    }
+    this.log(`Found ${added} more popular artists to import.`);
     return added;
   }
 
   // Handles a search with no local answer: the words might be an artist, an album, or a song.
   async importSearchTerm(term) {
-    let added = await this.importArtistByName(term);
+    let added = await this.importArtistByName(term, { round: -1, id: 0 });
     const escaped = escapeLucene(term);
     const { 'release-groups': groups = [] } = await this.mb.searchReleaseGroups(`releasegroup:"${escaped}"`, { limit: 5 });
     for (const group of groups) {
@@ -176,10 +226,24 @@ export class Importer {
   }
 }
 
-export function enqueueImport(db, kind, term) {
+const URGENT_KINDS = new Set(['search', 'artist_id']);
+
+// Returns true when this added a new job. Asking again for something still waiting moves it up the line.
+export function enqueueImport(db, kind, term, { round = URGENT_KINDS.has(kind) ? -1 : 0, rank = null, payload = null } = {}) {
   const clean = String(term).trim().slice(0, 120);
-  if (!clean) return;
-  db.prepare('INSERT OR IGNORE INTO import_queue (kind, term, term_key) VALUES (?, ?, ?)').run(kind, clean, clean.toLowerCase());
+  if (!clean) return false;
+  const key = clean.toLowerCase();
+  const existing = db.prepare('SELECT id, status, round FROM import_queue WHERE kind = ? AND term_key = ?').get(kind, key);
+  if (existing) {
+    if (existing.status === 'pending' && round < existing.round) {
+      db.prepare('UPDATE import_queue SET round = ? WHERE id = ?').run(round, existing.id);
+    }
+    return false;
+  }
+  const id = Number(db.prepare('INSERT INTO import_queue (kind, term, term_key, round, rank, payload) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(kind, clean, key, round, rank ?? 0, payload).lastInsertRowid);
+  if (rank === null) db.prepare('UPDATE import_queue SET rank = ? WHERE id = ?').run(id, id);
+  return true;
 }
 
 export function importStatus(db, term) {
@@ -188,31 +252,53 @@ export function importStatus(db, term) {
 }
 
 export function artistImportPending(db, mbid) {
-  return Boolean(mbid && db.prepare(`SELECT 1 FROM import_queue WHERE kind = 'artist_id' AND term_key = ? AND status = 'pending'`).get(mbid.toLowerCase()));
+  if (!mbid) return false;
+  const job = db.prepare(`SELECT id, status FROM import_queue WHERE kind = 'artist_id' AND term_key = ?`).get(mbid.toLowerCase());
+  if (!job) return false;
+  return job.status === 'pending'
+    || Boolean(db.prepare(`SELECT 1 FROM import_queue WHERE kind = 'album' AND rank = ? AND status = 'pending' LIMIT 1`).get(job.id));
+}
+
+export function libraryCounts(db) {
+  return db.prepare('SELECT (SELECT count(*) FROM artists) AS artists, (SELECT count(*) FROM albums) AS albums, (SELECT count(*) FROM songs) AS songs').get();
 }
 
 export function libraryLoading(db) {
   return Boolean(db.prepare(`SELECT 1 FROM import_queue WHERE status = 'pending' LIMIT 1`).get());
 }
 
+// Safe to run on every start: only artists new to the list are added.
 export function enqueueStarterCatalog(db) {
-  if (db.prepare('SELECT 1 FROM artists LIMIT 1').get() || db.prepare('SELECT 1 FROM import_queue LIMIT 1').get()) return 0;
   const names = readFileSync(new URL('../catalog/starter-artists.txt', import.meta.url), 'utf8')
     .split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('#'));
-  for (const name of names) enqueueImport(db, 'artist', name);
-  return names.length;
+  return names.filter((name) => enqueueImport(db, 'artist', name)).length;
 }
 
-export async function processNextImport(db, importer) {
-  const job = db.prepare(`SELECT id, kind, term FROM import_queue WHERE status = 'pending'
-    ORDER BY (kind IN ('search', 'artist_id')) DESC, id LIMIT 1`).get();
+export function enqueueDiscovery(db, now = Date.now()) {
+  return enqueueImport(db, 'discover', `listenbrainz-week-${Math.floor(now / (7 * 86400000))}`, { round: 0, rank: 0 });
+}
+
+// A job that fails for good is marked failed. If the service can't be reached, the job stays in line
+// and the error goes to the caller, so a lost connection can't use up the whole queue.
+export async function processNextImport(db, importer, { maxRound = null } = {}) {
+  const job = db.prepare(`SELECT id, kind, term, round, rank, payload FROM import_queue
+    WHERE status = 'pending' AND (? IS NULL OR round <= ?)
+    ORDER BY round, rank, (kind = 'album') DESC, id LIMIT 1`).get(maxRound, maxRound);
   if (!job) return false;
   try {
-    if (job.kind === 'artist') await importer.importArtistByName(job.term);
-    else if (job.kind === 'artist_id') await importer.importArtistById(job.term);
+    if (job.kind === 'artist') await importer.importArtistByName(job.term, job);
+    else if (job.kind === 'artist_id') await importer.importArtistById(job.term, job);
+    else if (job.kind === 'album') await importer.importReleaseGroup(job.term, { group: JSON.parse(job.payload || 'null') });
+    else if (job.kind === 'discover') await importer.discoverPopularArtists();
     else await importer.importSearchTerm(job.term);
-    db.prepare(`UPDATE import_queue SET status = 'done', finished_at = datetime('now') WHERE id = ?`).run(job.id);
+    db.prepare(`UPDATE import_queue SET status = 'done', payload = NULL, finished_at = datetime('now') WHERE id = ?`).run(job.id);
   } catch (err) {
+    // Discovery is optional, and one stubborn album mustn't hold up everything behind it.
+    const tries = (importer.failedTries.get(job.id) ?? 0) + 1;
+    importer.failedTries.set(job.id, tries);
+    const giveUp = err.permanent || err instanceof SyntaxError || job.kind === 'discover' || tries >= MAX_TRIES;
+    if (!giveUp) throw err;
+    importer.log(`Skipped ${job.kind} "${job.term}": ${err.message}`);
     db.prepare(`UPDATE import_queue SET status = 'failed', error = ?, finished_at = datetime('now') WHERE id = ?`).run(err.message, job.id);
   }
   return true;
@@ -222,6 +308,7 @@ export async function processNextImport(db, importer) {
 export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log = console.log }) {
   let stopped = false;
   let timer;
+  let lastDiscoveryCheck = 0;
   const syncDue = () => {
     const { done, attempted } = db.prepare(`SELECT max(CASE WHEN status = 'done' THEN started_at END) AS done, max(started_at) AS attempted FROM sync_runs`).get();
     const hoursSince = (at) => (Date.now() - Date.parse(`${at}Z`)) / 3600000;
@@ -229,19 +316,26 @@ export function startCatalogWorker(db, importer, { syncEveryHours, maxNew, log =
   };
   const tick = async () => {
     try {
-      const worked = await processNextImport(db, importer);
-      if (!worked && syncDue()) {
+      if (Date.now() - lastDiscoveryCheck > 3600000) {
+        lastDiscoveryCheck = Date.now();
+        enqueueDiscovery(db);
+      }
+      // New releases keep arriving during a long import, once the library has its first albums.
+      if (syncDue() && (libraryCounts(db).albums >= SYNC_WAITS_FOR_ALBUMS || !libraryLoading(db))) {
         const added = await importer.runSync({ maxNew });
         log(`Catalog sync added ${added} new releases.`);
       }
-      if (!stopped) timer = setTimeout(tick, worked ? 100 : 15000);
+      const worked = await processNextImport(db, importer);
+      if (!stopped) timer = setTimeout(tick, worked ? 50 : 15000);
     } catch (err) {
-      log(`Catalog sync failed: ${err.message}`);
-      if (!stopped) timer = setTimeout(tick, 15 * 60000);
+      log(`Catalog import paused for 5 minutes: ${err.message}`);
+      if (!stopped) timer = setTimeout(tick, OFFLINE_WAIT_MS);
     }
   };
   db.prepare(`UPDATE sync_runs SET status = 'failed', error = 'Interrupted by a restart', finished_at = datetime('now') WHERE status = 'running'`).run();
-  enqueueStarterCatalog(db);
+  db.prepare(`UPDATE import_queue SET status = 'pending', error = NULL WHERE status = 'failed'`).run();
+  const added = enqueueStarterCatalog(db);
+  if (added) log(`Added ${added} artists to the import list.`);
   timer = setTimeout(tick, 2000);
   return () => { stopped = true; clearTimeout(timer); };
 }

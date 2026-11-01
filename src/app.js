@@ -4,7 +4,7 @@ import {
   RateLimiter, SESSION_MAX_AGE, createSession, destroySession, hashPassword, userFromSession, validateSignup, verifyPassword,
 } from './auth.js';
 import * as catalog from './catalog.js';
-import { artistImportPending, enqueueImport, importStatus, libraryLoading } from './importer.js';
+import { artistImportPending, enqueueImport, importStatus, libraryCounts, libraryLoading } from './importer.js';
 import { LIVE_KINDS } from './live-search.js';
 import { INTERACTIVE } from './musicbrainz.js';
 import * as posts from './posts.js';
@@ -212,6 +212,7 @@ export function createApp({ db, config, importer = null, live = null }) {
         posts: withTopics(posts.recentPosts(db, 6)),
         genres: catalog.listGenres(db, { limit: 24 }).items,
         loading: libraryLoading(db),
+        counts: libraryCounts(db),
       }));
     }],
     ['GET', /^\/healthz$/, (ctx) => {

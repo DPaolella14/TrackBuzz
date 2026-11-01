@@ -120,6 +120,7 @@ p { margin: 0 0 1em; }
 .hero h1 { max-width: 13em; margin-bottom: 18px; font-size: clamp(2.7rem, 7.4vw, 6rem); font-weight: 800; letter-spacing: -0.04em; line-height: 1; }
 .hero p { max-width: 36em; margin-bottom: 28px; color: var(--soft); font-size: 1.15rem; }
 .hero .search { max-width: 720px; }
+.hero .library-count { margin: 14px 0 0 4px; font-size: 0.925rem; }
 .hero-wave { display: flex; align-items: center; justify-content: space-between; height: clamp(44px, 7vw, 88px); margin-top: clamp(36px, 5vw, 60px); pointer-events: none; }
 .hero-wave span { flex: 0 1 8px; min-width: 2px; height: 58%; border-radius: 99px; background: var(--pink); animation: buzz 1.4s ease-out 1 both; }
 .hero-wave span:nth-child(4n+1) { background: var(--pink); }

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { search } from '../src/catalog.js';
 import { openDb } from '../src/db.js';
 import {
-  Importer, chooseRelease, creditText, enqueueImport, enqueueStarterCatalog, isWantedGroup, processNextImport,
+  Importer, chooseArtist, chooseRelease, creditText, enqueueDiscovery, enqueueImport, enqueueStarterCatalog, isWantedGroup, processNextImport,
 } from '../src/importer.js';
 import { MusicBrainzClient, escapeLucene } from '../src/musicbrainz.js';
 
@@ -120,14 +120,18 @@ describe('staying up to date', () => {
     assert.equal(db.prepare('SELECT status FROM sync_runs ORDER BY id DESC').get().status, 'failed');
   });
 
-  it('queues the starter artists only for an empty library', () => {
+  it('queues hundreds of artists once, including ones people asked for', () => {
     const db = openDb(':memory:');
-    assert.ok(enqueueStarterCatalog(db) > 10);
+    assert.ok(enqueueStarterCatalog(db) > 500);
     assert.equal(enqueueStarterCatalog(db), 0);
+    const has = db.prepare(`SELECT 1 FROM import_queue WHERE kind = 'artist' AND term_key = ?`);
+    for (const name of ['alice in chains', 'metallica', 'radiohead']) assert.ok(has.get(name), name);
   });
 });
 
 describe('search requests', () => {
+  const drain = async (db, importer) => { while (await processNextImport(db, importer)) { /* keep going */ } };
+
   it('imports the best matches and marks the job done', async () => {
     const db = openDb(':memory:');
     const mb = fakeMb({
@@ -139,19 +143,125 @@ describe('search requests', () => {
       recordings: { recordings: [{ id: 'r', score: 95, releases: [{ 'release-group': { id: 'from-song' } }] }, { id: 'weak', score: 40, releases: [{ 'release-group': { id: 'weak' } }] }] },
     });
     enqueueImport(db, 'search', 'Test Artist');
-    assert.equal(await processNextImport(db, new Importer(db, mb)), true);
+    await drain(db, new Importer(db, mb));
     assert.deepEqual(db.prepare('SELECT mbid FROM albums ORDER BY mbid').all().map((row) => row.mbid), ['from-song', 'real']);
-    assert.equal(db.prepare('SELECT status FROM import_queue').get().status, 'done');
-    assert.equal(await processNextImport(db, new Importer(db, mb)), false);
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM import_queue WHERE status != 'done'`).get().n, 0);
   });
 
-  it('marks a failed job instead of retrying forever', async () => {
+  it('keeps a job in line when the service is unreachable, and fails it when the request is bad', async () => {
     const db = openDb(':memory:');
     const mb = fakeMb();
     mb.searchArtists = async () => { throw new Error('offline'); };
     enqueueImport(db, 'search', 'Anything');
-    await processNextImport(db, new Importer(db, mb));
+    await assert.rejects(processNextImport(db, new Importer(db, mb)));
+    assert.equal(db.prepare('SELECT status FROM import_queue').get().status, 'pending');
+    mb.searchArtists = async () => { throw Object.assign(new Error('bad request'), { permanent: true }); };
+    assert.equal(await processNextImport(db, new Importer(db, mb)), true);
     assert.equal(db.prepare('SELECT status FROM import_queue').get().status, 'failed');
+  });
+});
+
+describe('jobs that keep failing', () => {
+  it('gives up on one after three tries so the rest can run', async () => {
+    const db = openDb(':memory:');
+    const mb = fakeMb();
+    mb.lookupReleaseGroup = async () => { throw new Error('timed out'); };
+    const importer = new Importer(db, mb);
+    enqueueImport(db, 'album', 'stuck');
+    await assert.rejects(processNextImport(db, importer));
+    await assert.rejects(processNextImport(db, importer));
+    assert.equal(await processNextImport(db, importer), true);
+    assert.equal(db.prepare('SELECT status FROM import_queue').get().status, 'failed');
+  });
+
+  it('carries on when ListenBrainz is down', async () => {
+    const db = openDb(':memory:');
+    const importer = new Importer(db, fakeMb());
+    importer.discoverPopularArtists = async () => { throw new Error('unreachable'); };
+    enqueueDiscovery(db);
+    assert.equal(await processNextImport(db, importer), true);
+    assert.equal(db.prepare('SELECT status FROM import_queue').get().status, 'failed');
+  });
+});
+
+describe('bulk imports', () => {
+  const albumsOf = (artist) => Array.from({ length: 3 }, (_, i) => group(`${artist}-${i}`, { 'artist-credit': [{ name: artist, artist: { id: artist, name: artist } }], 'first-release-date': `200${i}` }));
+
+  function bulkMb() {
+    const mb = fakeMb();
+    mb.searchArtists = async (query) => {
+      const name = query.match(/"(.*)"/)[1];
+      return { artists: [{ id: name, name, score: 100 }] };
+    };
+    mb.lookupArtist = async (id) => ({ id, name: id });
+    mb.browseArtistReleaseGroups = async (id) => ({ 'release-groups': albumsOf(id) });
+    return mb;
+  }
+
+  it('adds every artist\'s first album before anyone\'s second', async () => {
+    const db = openDb(':memory:');
+    const importer = new Importer(db, bulkMb());
+    enqueueImport(db, 'artist', 'one');
+    enqueueImport(db, 'artist', 'two');
+    const added = [];
+    while (await processNextImport(db, importer)) {
+      const row = db.prepare('SELECT mbid FROM albums ORDER BY id DESC LIMIT 1').get();
+      if (row && added[added.length - 1] !== row.mbid) added.push(row.mbid);
+    }
+    assert.deepEqual(added, ['one-2', 'two-2', 'one-1', 'two-1', 'one-0', 'two-0']);
+    assert.equal(db.prepare(`SELECT count(*) AS n FROM import_queue WHERE status != 'done'`).get().n, 0);
+  });
+
+  it('uses one request per album in a bulk import', async () => {
+    const db = openDb(':memory:');
+    const mb = bulkMb();
+    const importer = new Importer(db, mb);
+    enqueueImport(db, 'artist', 'one');
+    while (await processNextImport(db, importer)) { /* keep going */ }
+    assert.equal(db.prepare('SELECT count(*) AS n FROM albums').get().n, 3);
+    assert.equal(mb.calls.filter((call) => call.startsWith('group:')).length, 0);
+    assert.equal(mb.calls.filter((call) => call.startsWith('releases:')).length, 3);
+  });
+
+  it('puts someone\'s request ahead of the bulk list, and moves up a waiting artist', async () => {
+    const db = openDb(':memory:');
+    const importer = new Importer(db, bulkMb());
+    enqueueImport(db, 'artist', 'bulk');
+    enqueueImport(db, 'artist_id', 'wanted');
+    await processNextImport(db, importer);
+    assert.equal(db.prepare('SELECT mbid FROM artists').get().mbid, 'wanted');
+    enqueueImport(db, 'artist_id', 'later', { round: 0 });
+    enqueueImport(db, 'artist_id', 'later');
+    assert.equal(db.prepare(`SELECT round FROM import_queue WHERE term = 'later'`).get().round, -1);
+  });
+
+  it('picks the band people mean when several share a name', () => {
+    const chosen = chooseArtist([
+      { id: 'obscure', name: 'Genesis', score: 100, tags: [{ name: 'x', count: 1 }] },
+      { id: 'famous', name: 'Genesis', score: 100, tags: [{ name: 'prog', count: 12 }, { name: 'rock', count: 9 }] },
+      { id: 'other', name: 'Genesis Owusu', score: 95, tags: [{ name: 'y', count: 99 }] },
+    ], 'genesis');
+    assert.equal(chosen.id, 'famous');
+    assert.equal(chooseArtist([{ id: 'low', name: 'Nope', score: 20 }], 'Nope'), null);
+  });
+
+  it('discovers popular artists from ListenBrainz, skipping ones without IDs or already here', async () => {
+    const db = openDb(':memory:');
+    db.prepare(`INSERT INTO artists (mbid, name) VALUES ('here', 'Here')`).run();
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      if (url.includes('range=all_time')) return new Response(JSON.stringify({ payload: { artists: [{ artist_mbid: 'new-1', artist_name: 'New' }, { artist_name: 'No ID' }, { artist_mbid: 'here', artist_name: 'Here' }] } }));
+      return new Response(null, { status: 204 });
+    };
+    const importer = new Importer(db, fakeMb());
+    assert.equal(await importer.discoverPopularArtists({ fetchImpl, sleep: async () => {} }), 1);
+    assert.equal(urls.length, 4);
+    const job = db.prepare(`SELECT term, round FROM import_queue WHERE kind = 'artist_id'`).get();
+    assert.equal(job.term, 'new-1');
+    assert.equal(job.round, 0);
+    assert.equal(enqueueDiscovery(db, 0), true);
+    assert.equal(enqueueDiscovery(db, 1000), false, 'only once a week');
   });
 });
 

@@ -167,7 +167,7 @@ describe('upgrading an existing database', () => {
   it('keeps queued imports', () => {
     const db = openDb(':memory:');
     db.prepare(`INSERT INTO import_queue (kind, term, term_key) VALUES ('artist_id', 'x', 'x')`).run();
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
     assert.equal(db.prepare('SELECT count(*) AS n FROM import_queue').get().n, 1);
   });
 });

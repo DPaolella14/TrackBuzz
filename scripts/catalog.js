@@ -1,7 +1,7 @@
 // Run these while the web server is stopped, so MusicBrainz's one-request-per-second limit is respected.
 import { loadConfig } from '../src/config.js';
 import { openDb } from '../src/db.js';
-import { Importer } from '../src/importer.js';
+import { Importer, processNextImport } from '../src/importer.js';
 import { MusicBrainzClient } from '../src/musicbrainz.js';
 
 const [command, ...rest] = process.argv.slice(2);
@@ -13,7 +13,10 @@ if (command === 'sync') {
   console.log(`Added ${await importer.runSync({ maxNew: config.maxNewAlbumsPerSync })} new releases.`);
 } else if (command === 'import' && rest.length) {
   const term = rest.join(' ');
-  console.log(`Added ${await importer.importSearchTerm(term)} releases for "${term}".`);
+  await importer.importSearchTerm(term);
+  // The artist's albums were queued as urgent, so finish just those.
+  while (await processNextImport(db, importer, { maxRound: -1 })) { /* keep going */ }
+  console.log(`Finished importing "${term}".`);
 } else {
   console.error('Usage: npm run catalog:sync\n       npm run catalog:import -- "Artist, album, or song"');
   process.exitCode = 1;

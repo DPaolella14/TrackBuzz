@@ -234,7 +234,8 @@ function pager(basePath, params, page, hasMore) {
   </nav>`;
 }
 
-export function homePage(ctx, { albums, posts, genres, loading }) {
+export function homePage(ctx, { albums, posts, genres, loading, counts }) {
+  const number = (value) => value.toLocaleString('en-US');
   return layout(ctx, {
     hero: true,
     body: html`
@@ -242,6 +243,7 @@ export function homePage(ctx, { albums, posts, genres, loading }) {
       <h1>What's the story behind your music?</h1>
       <p>Find any album, song, artist, or genre. Then share a personal story, a concert memory, a performance tip, or a rating.</p>
       ${searchForm('home-search')}
+      ${counts.songs ? html`<p class="library-count">${number(counts.songs)} songs on ${number(counts.albums)} albums from ${number(counts.artists)} artists so far${loading ? ', with more added every minute' : ''}.</p>` : ''}
       <div class="hero-wave" aria-hidden="true">${Array.from({ length: 48 }, () => html`<span></span>`)}</div>
     </section>
     ${albums.length ? html`<section class="section">

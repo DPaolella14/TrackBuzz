@@ -96,7 +96,7 @@ export class MusicBrainzClient {
   }
 
   browseArtistReleaseGroups(artistId, { limit = 100, offset = 0, type = 'album|ep' } = {}) {
-    return this.get('release-group', { artist: artistId, type, limit, offset });
+    return this.get('release-group', { artist: artistId, type, limit, offset, inc: 'artist-credits+genres' });
   }
 
   browseReleases(releaseGroupId, options) {
