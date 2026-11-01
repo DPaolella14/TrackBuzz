@@ -515,14 +515,14 @@ export async function siteIsRunning(port, fetchImpl = fetch) {
 
 export async function runFullImport({
   databasePath, workDir = join(dirname(databasePath), 'full-import'), port = 3000, includeGenres = true,
-  checkOnly = false, fetchImpl = fetch, hosts = DOWNLOAD_HOSTS, log = defaultLog,
+  checkOnly = false, fetchImpl = fetch, hosts = DOWNLOAD_HOSTS, log = defaultLog, spaceForDatabase = SPACE_FOR_DATABASE,
 }) {
   const archives = [ARCHIVES.core, ARCHIVES.art, ...(includeGenres ? [ARCHIVES.genres] : [])];
   mkdirSync(workDir, { recursive: true });
   const latest = await latestFolder(fetchImpl, hosts);
   const sizes = await Promise.all(archives.map((archive) => remoteSize(fetchImpl, `${latest.url}/${archive.file}`)));
   const downloadSize = sizes.reduce((sum, size) => sum + size, 0);
-  const needed = downloadSize + SPACE_FOR_DATABASE;
+  const needed = downloadSize + spaceForDatabase;
   const free = freeSpace(workDir);
   log(`Latest catalog: ${latest.name}. Download: ${formatGb(downloadSize)}. Needed: at least ${formatGb(needed)}. Free: ${formatGb(free)}.`);
   const memory = totalmem();
@@ -570,9 +570,10 @@ export async function runFullImport({
   current.prepare('VACUUM INTO ?').run(newPath);
   current.close();
 
+  const minimumFree = Math.min(MINIMUM_FREE, spaceForDatabase);
   const checkSpace = () => {
     const left = freeSpace(dirname(newPath));
-    if (left < MINIMUM_FREE) throw new ImportStopped(`Stopped with ${formatGb(left)} left, so the drive doesn't fill up. Your site is unchanged.`);
+    if (left < minimumFree) throw new ImportStopped(`Stopped with ${formatGb(left)} left, so the drive doesn't fill up. Your site is unchanged.`);
   };
   const db = openDb(newPath);
   let result;

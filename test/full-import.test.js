@@ -263,7 +263,7 @@ describe('the whole import, start to finish', () => {
   it('downloads, verifies, unpacks, loads, and swaps in the new library', async () => {
     const { archives, databasePath } = prepare();
     const { fetchImpl } = site(archives);
-    const result = await runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {} });
+    const result = await runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {}, spaceForDatabase: 0 });
     assert.equal(result.songs, 5);
     const db = openDb(databasePath);
     assert.equal(search(db, 'alice in chains').items[0].name, 'Alice in Chains');
@@ -276,7 +276,7 @@ describe('the whole import, start to finish', () => {
   it('refuses a corrupted download, and leaves the site alone', async () => {
     const { archives, databasePath } = prepare();
     const { fetchImpl } = site(archives, { sumFor: () => 'bad' });
-    await assert.rejects(runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {} }), /integrity check/);
+    await assert.rejects(runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {}, spaceForDatabase: 0 }), /integrity check/);
     const db = openDb(databasePath);
     assert.equal(isFullCatalog(db), false);
     db.close();
@@ -285,7 +285,7 @@ describe('the whole import, start to finish', () => {
   it('refuses to start while the site is running', async () => {
     const { archives, databasePath } = prepare();
     const { fetchImpl } = site(archives, { running: true });
-    await assert.rejects(runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {} }), /site is running/);
+    await assert.rejects(runFullImport({ databasePath, fetchImpl, hosts: ['https://example.test/x'], log: () => {}, spaceForDatabase: 0 }), /site is running/);
   });
 
   it('can check space without changing anything', async () => {
