@@ -148,20 +148,35 @@ const ALBUM_LIST = `SELECT albums.id, albums.title AS name, albums.artist_id, al
 
 const page = (rows, limit) => ({ items: rows.slice(0, limit), hasMore: rows.length > limit });
 
-export function listAlbums(db, { limit = 24, offset = 0, releasedOnly = false } = {}) {
+// Relevance means popularity: how many editions of an album exist, or of an artist's albums.
+// Each order matches an index, so every page stays fast at full catalog size.
+export const SORTS = {
+  album: { relevance: 'Relevance', newest: 'Newest', name: 'A to Z' },
+  artist: { relevance: 'Relevance', name: 'A to Z' },
+  song: { relevance: 'Relevance', newest: 'Newest' },
+};
+
+export function listAlbums(db, { limit = 24, offset = 0, releasedOnly = false, sort = 'newest' } = {}) {
   const released = releasedOnly ? `WHERE release_date <= date('now')` : '';
-  return page(db.prepare(`${ALBUM_LIST} ${released} ORDER BY release_date DESC, albums.id DESC LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+  const order = {
+    relevance: 'popularity DESC, albums.id',
+    name: 'title COLLATE NOCASE, popularity DESC',
+    newest: 'release_date DESC, albums.id DESC',
+  }[sort] ?? 'release_date DESC, albums.id DESC';
+  return page(db.prepare(`${ALBUM_LIST} ${released} ORDER BY ${order} LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
-export function listSongs(db, { limit = 40, offset = 0 } = {}) {
+export function listSongs(db, { limit = 40, offset = 0, sort = 'newest' } = {}) {
+  const albumOrder = sort === 'relevance' ? 'albums.popularity DESC, albums.id' : 'albums.release_date DESC, albums.id DESC';
   return page(db.prepare(`SELECT songs.id, songs.title AS name, songs.artist_id, songs.artist_credit, songs.duration_ms, songs.album_id, songs.disc, songs.position,
       albums.title AS album_title, albums.cover_url, albums.release_date, 'song' AS type
     FROM albums CROSS JOIN songs ON songs.album_id = albums.id
-    ORDER BY albums.release_date DESC, albums.id DESC, songs.disc, songs.position LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+    ORDER BY ${albumOrder}, songs.disc, songs.position LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
-export function listArtists(db, { limit = 48, offset = 0 } = {}) {
-  return page(db.prepare(`SELECT id, name, country, artist_type, begin_year, ${ARTIST_PICTURE}, 'artist' AS type FROM artists ORDER BY name COLLATE NOCASE LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
+export function listArtists(db, { limit = 48, offset = 0, sort = 'name' } = {}) {
+  const order = sort === 'relevance' ? 'popularity DESC, id' : 'name COLLATE NOCASE, popularity DESC';
+  return page(db.prepare(`SELECT id, name, country, artist_type, begin_year, ${ARTIST_PICTURE}, 'artist' AS type FROM artists ORDER BY ${order} LIMIT ? OFFSET ?`).all(limit + 1, offset), limit);
 }
 
 export function listGenres(db, { limit = 120, offset = 0 } = {}) {

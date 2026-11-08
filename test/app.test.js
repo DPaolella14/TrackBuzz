@@ -226,6 +226,32 @@ describe('home page', () => {
   });
 });
 
+describe('sorting', () => {
+  it('sorts albums, artists, and songs by relevance unless asked otherwise', async () => {
+    const artist = Number(app.db.prepare(`INSERT INTO artists (name, popularity) VALUES ('Zz Famous Band', 999)`).run().lastInsertRowid);
+    const album = Number(app.db.prepare(`INSERT INTO albums (title, artist_id, artist_credit, release_date, popularity) VALUES ('Zz Famous Album', ?, 'Zz Famous Band', '1970-01-01', 999)`).run(artist).lastInsertRowid);
+    app.db.prepare(`INSERT INTO songs (title, album_id, artist_id, artist_credit, position) VALUES ('Zz Famous Song', ?, ?, 'Zz Famous Band', 1)`).run(album, artist);
+    const client = new Client(app.base);
+    const first = (text, cls) => text.match(new RegExp(`class="${cls}">([^<]+)<`))?.[1];
+    const albums = await client.get('/albums');
+    assert.equal(first(albums.text, 'tile-title'), 'Zz Famous Album');
+    assert.match(albums.text, /aria-current="page">Relevance/);
+    assert.equal(first((await client.get('/albums?sort=newest')).text, 'tile-title'), 'Midnight Signal');
+    assert.notEqual(first((await client.get('/albums?sort=name')).text, 'tile-title'), 'Zz Famous Album');
+    assert.equal(first((await client.get('/artists')).text, 'song-title'), 'Zz Famous Band');
+    assert.notEqual(first((await client.get('/artists?sort=name')).text, 'song-title'), 'Zz Famous Band');
+    assert.equal(first((await client.get('/songs')).text, 'song-title'), 'Zz Famous Song');
+    assert.equal((await client.get('/songs?sort=name')).status, 200, 'an unknown sort falls back to relevance');
+    assert.ok(!(await client.get('/genres')).text.includes('Sort by'));
+  });
+
+  it('keeps the sort when changing pages', async () => {
+    for (let i = 0; i < 30; i += 1) app.db.prepare(`INSERT INTO albums (title, artist_id, artist_credit) VALUES (?, 1, 'x')`).run(`Filler ${i}`);
+    const { text } = await new Client(app.base).get('/albums?sort=name');
+    assert.match(text, /href="\/albums\?sort=name&amp;page=2"/);
+  });
+});
+
 describe('browser caching', () => {
   it('gives files a fingerprinted URL, so an update reaches browsers right away', async () => {
     const client = new Client(app.base);

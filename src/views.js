@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { assetUrl } from './assets.js';
 import { html } from './html.js';
 import { TABS, MAX_BODY } from './posts.js';
-import { topicUrl } from './catalog.js';
+import { SORTS, topicUrl } from './catalog.js';
 
 const KIND_LABEL = { album: 'Album', song: 'Song', artist: 'Artist', genre: 'Genre' };
 const KIND_PLURAL = { album: 'Albums', song: 'Songs', artist: 'Artists', genre: 'Genres' };
@@ -344,7 +344,18 @@ export function searchPage(ctx, { q, kind, results, page, importState }) {
   });
 }
 
-export function browsePage(ctx, { kind, list, page }) {
+function sortLinks(kind, current) {
+  const options = SORTS[kind];
+  if (!options) return '';
+  return html`<nav class="sort" aria-label="Sort ${KIND_PLURAL[kind].toLowerCase()}">
+    <span class="sort-label">Sort by</span>
+    <ul class="filters">${Object.entries(options).map(([key, label]) => html`<li>
+      <a href="/${kind}s${key === 'relevance' ? '' : `?sort=${key}`}" ${key === current ? html`aria-current="page"` : ''}>${label}</a>
+    </li>`)}</ul>
+  </nav>`;
+}
+
+export function browsePage(ctx, { kind, list, page, sort = null }) {
   const content = {
     album: () => albumGrid(list.items),
     song: () => songRows(list.items),
@@ -355,8 +366,9 @@ export function browsePage(ctx, { kind, list, page }) {
     title: KIND_PLURAL[kind],
     body: html`<section class="section">
       <h1 class="page-title">${KIND_PLURAL[kind]}</h1>
+      ${sortLinks(kind, sort)}
       ${list.items.length ? content : html`<p class="empty-text">Nothing here yet. The library updates automatically, so check back soon.</p>`}
-      ${pager(`/${kind}s`, {}, page, list.hasMore)}
+      ${pager(`/${kind}s`, sort && sort !== 'relevance' ? { sort } : {}, page, list.hasMore)}
     </section>`,
   });
 }

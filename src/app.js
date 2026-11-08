@@ -212,8 +212,11 @@ export function createApp({ db, config, importer = null, live = null }) {
 
   const browse = (kind, lister, size, cached = false) => (ctx) => {
     const page = pageNumber(ctx.url);
-    const load = () => lister(db, { offset: (page - 1) * size });
-    send(ctx, views.browsePage(ctx, { kind, page, list: cached ? remember(`${kind}-${page}`, load) : load() }));
+    const options = catalog.SORTS[kind];
+    const requested = ctx.url.searchParams.get('sort');
+    const sort = options ? (options[requested] ? requested : 'relevance') : null;
+    const load = () => lister(db, { offset: (page - 1) * size, ...(sort ? { sort } : {}) });
+    send(ctx, views.browsePage(ctx, { kind, page, sort, list: cached ? remember(`${kind}-${page}`, load) : load() }));
   };
 
   const routes = [

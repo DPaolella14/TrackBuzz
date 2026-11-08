@@ -181,6 +181,9 @@ p { margin: 0 0 1em; }
 .filters a { display: block; padding: 5px 13px; border-radius: 999px; color: var(--soft); font-size: 0.9rem; text-decoration: none; }
 .filters a:hover { background: var(--surface); color: var(--text); }
 .filters a[aria-current="page"] { background: var(--text); color: var(--on-color); font-weight: 600; }
+.sort { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 22px; }
+.sort .filters { margin-bottom: 0; }
+.sort-label { color: var(--soft); font-size: 0.9rem; }
 .result-list + .live-status { margin-top: 14px; }
 .live-status { color: var(--soft); font-size: 0.9rem; }
 .live-status:empty { display: none; }
